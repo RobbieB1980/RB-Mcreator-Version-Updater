@@ -19,8 +19,10 @@ public sealed class SetupForm : Form
 
     public SetupForm()
     {
-        Text = "Install RB MCreator Version Updater";
-        Size = new Size(560, 320);
+        Text = "Install RB All Updater";
+        // ClientSize (not outer Size) so DPI/title-bar never clips the bottom buttons
+        ClientSize = new Size(580, 380);
+        MinimumSize = new Size(560, 360);
         FormBorderStyle = FormBorderStyle.FixedDialog;
         MaximizeBox = false;
         MinimizeBox = false;
@@ -28,57 +30,63 @@ public sealed class SetupForm : Form
         BackColor = Color.FromArgb(32, 34, 40);
         ForeColor = Color.Gainsboro;
         Font = new Font("Segoe UI", 9.5f);
+        Padding = new Padding(0, 0, 0, 12);
+        AutoScaleMode = AutoScaleMode.Dpi;
 
         var title = new Label
         {
-            Text = "RB MCreator Version Updater",
+            Text = "RB All Updater",
             Font = new Font("Segoe UI Semibold", 14f),
             ForeColor = Color.White,
-            Location = new Point(20, 16),
+            Location = new Point(24, 18),
             AutoSize = true
         };
         var sub = new Label
         {
-            Text = "Installs a fully portable toolset (GUI EXE + PowerShell converter + templates).",
+            Text = "Installs a portable toolset for MCreator, ModDevGradle, and NeoGradle 26.1 → 26.2.",
             ForeColor = Color.FromArgb(160, 200, 160),
-            Location = new Point(20, 48),
-            Size = new Size(500, 36)
+            Location = new Point(24, 52),
+            Size = new Size(530, 36)
         };
 
-        var lbl = new Label { Text = "Install folder:", Location = new Point(20, 96), AutoSize = true };
-        _txtDir.Location = new Point(20, 120);
-        _txtDir.Width = 400;
+        var lbl = new Label { Text = "Install folder:", Location = new Point(24, 100), AutoSize = true };
+        _txtDir.Location = new Point(24, 126);
+        _txtDir.Width = 420;
+        _txtDir.Height = 26;
         _txtDir.BackColor = Color.FromArgb(45, 48, 56);
         _txtDir.ForeColor = Color.White;
         _txtDir.BorderStyle = BorderStyle.FixedSingle;
         _txtDir.Text = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "RB-Mcreator-Version-Updater");
+            "RB-All-Updater");
 
-        _btnBrowse.Location = new Point(430, 118);
+        _btnBrowse.Location = new Point(454, 124);
         _btnBrowse.FlatStyle = FlatStyle.Flat;
         _btnBrowse.BackColor = Color.FromArgb(60, 64, 78);
         _btnBrowse.ForeColor = Color.White;
 
-        _chkDesktop.Location = new Point(20, 160);
+        _chkDesktop.Location = new Point(24, 170);
         _chkDesktop.ForeColor = Color.Gainsboro;
-        _chkStartMenu.Location = new Point(20, 186);
+        _chkStartMenu.Location = new Point(24, 200);
         _chkStartMenu.ForeColor = Color.Gainsboro;
 
-        _progress.Location = new Point(20, 220);
-        _progress.Width = 510;
+        _progress.Location = new Point(24, 242);
+        _progress.Size = new Size(532, 22);
 
-        _status.Location = new Point(20, 250);
-        _status.Size = new Size(300, 40);
+        // Status left; Install + Close fully visible on the right with room below
+        _status.Location = new Point(24, 282);
+        _status.Size = new Size(300, 48);
         _status.ForeColor = Color.Gainsboro;
 
-        _btnInstall.Location = new Point(300, 248);
+        _btnInstall.Location = new Point(320, 288);
+        _btnInstall.Size = new Size(120, 36);
         _btnInstall.FlatStyle = FlatStyle.Flat;
         _btnInstall.BackColor = Color.FromArgb(46, 120, 80);
         _btnInstall.ForeColor = Color.White;
         _btnInstall.FlatAppearance.BorderColor = Color.FromArgb(70, 160, 100);
 
-        _btnCancel.Location = new Point(430, 248);
+        _btnCancel.Location = new Point(452, 288);
+        _btnCancel.Size = new Size(104, 36);
         _btnCancel.FlatStyle = FlatStyle.Flat;
         _btnCancel.BackColor = Color.FromArgb(60, 64, 78);
         _btnCancel.ForeColor = Color.White;
@@ -141,9 +149,11 @@ public sealed class SetupForm : Form
             _status.Text = "Installation complete.";
             _status.ForeColor = Color.LightGreen;
 
-            var exe = Path.Combine(dest, "RB-Mcreator-Version-Updater.exe");
+            var exe = Path.Combine(dest, "RB-All-Updater.exe");
+            if (!File.Exists(exe))
+                exe = Path.Combine(dest, "RB-Mcreator-Version-Updater.exe"); // legacy package name
             var r = MessageBox.Show(this,
-                "Installed successfully to:\n" + dest + "\n\nLaunch the updater now?",
+                "Installed successfully to:\n" + dest + "\n\nLaunch RB All Updater now?",
                 "Setup complete", MessageBoxButtons.YesNo, MessageBoxIcon.Information);
             if (r == DialogResult.Yes && File.Exists(exe))
             {
@@ -179,26 +189,28 @@ public sealed class SetupForm : Form
         // Clear previous install files carefully (only our known names if folder was used before)
         ExtractZip(payloadZip, dest, progress => Report(20 + (int)(progress * 60), "Extracting..."));
 
-        var exe = Path.Combine(dest, "RB-Mcreator-Version-Updater.exe");
+        var exe = Path.Combine(dest, "RB-All-Updater.exe");
         if (!File.Exists(exe))
-            throw new InvalidOperationException("Package extracted but RB-Mcreator-Version-Updater.exe is missing.");
+            exe = Path.Combine(dest, "RB-Mcreator-Version-Updater.exe");
+        if (!File.Exists(exe))
+            throw new InvalidOperationException("Package extracted but RB-All-Updater.exe is missing.");
 
         Report(85, "Creating shortcuts...");
         if (_chkDesktop.Checked)
             CreateShortcut(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory),
-                "RB MCreator Version Updater.lnk"), exe, dest);
+                "RB All Updater.lnk"), exe, dest);
         if (_chkStartMenu.Checked)
         {
             var sm = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.StartMenu), "Programs",
-                "RB MCreator Version Updater");
+                "RB All Updater");
             Directory.CreateDirectory(sm);
-            CreateShortcut(Path.Combine(sm, "RB MCreator Version Updater.lnk"), exe, dest);
+            CreateShortcut(Path.Combine(sm, "RB All Updater.lnk"), exe, dest);
             CreateShortcut(Path.Combine(sm, "Uninstall (delete folder).lnk"), "explorer.exe", dest, dest);
         }
 
         Report(92, "Writing uninstaller helper...");
         File.WriteAllText(Path.Combine(dest, "UNINSTALL.txt"),
-            "To uninstall RB MCreator Version Updater:\r\n" +
+            "To uninstall RB All Updater:\r\n" +
             "1. Close the application if it is running.\r\n" +
             "2. Delete this folder:\r\n   " + dest + "\r\n" +
             "3. Remove desktop / Start Menu shortcuts if present.\r\n");
@@ -207,7 +219,7 @@ public sealed class SetupForm : Form
         try
         {
             using var key = Registry.CurrentUser.CreateSubKey(
-                @"Software\Microsoft\Windows\CurrentVersion\App Paths\RB-Mcreator-Version-Updater.exe");
+                @"Software\Microsoft\Windows\CurrentVersion\App Paths\RB-All-Updater.exe");
             key?.SetValue("", exe);
             key?.SetValue("Path", dest);
         }
@@ -225,6 +237,7 @@ public sealed class SetupForm : Form
         var names = new[]
         {
             "portable-payload.zip",
+            "RB-All-Updater-Portable.zip",
             "RB-Mcreator-Version-Updater-Portable.zip",
             "payload.zip"
         };
@@ -241,7 +254,7 @@ public sealed class SetupForm : Form
                                  || n.Equals("portable-payload.zip", StringComparison.OrdinalIgnoreCase));
         if (resourceName is not null)
         {
-            var temp = Path.Combine(Path.GetTempPath(), "RB-Mcreator-Version-Updater-payload-" + Guid.NewGuid().ToString("N") + ".zip");
+            var temp = Path.Combine(Path.GetTempPath(), "RB-All-Updater-payload-" + Guid.NewGuid().ToString("N") + ".zip");
             using (var stream = asm.GetManifestResourceStream(resourceName)!)
             using (var fs = File.Create(temp))
                 stream.CopyTo(fs);
@@ -325,7 +338,7 @@ $s = $w.CreateShortcut('{EscapePs(lnkPath)}')
 $s.TargetPath = '{EscapePs(target)}'
 $s.WorkingDirectory = '{EscapePs(workingDir)}'
 {(args is null ? "" : $"$s.Arguments = '{EscapePs(args)}'")}
-$s.Description = 'RB MCreator Version Updater'
+$s.Description = 'RB All Updater'
 $s.Save()
 ";
         var psi = new ProcessStartInfo

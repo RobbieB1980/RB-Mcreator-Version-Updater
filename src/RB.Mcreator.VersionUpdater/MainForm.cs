@@ -13,106 +13,263 @@ public sealed class MainForm : Form
     private readonly CheckBox _chkFetch = NewCheck("Fetch Gradle wrapper (recommended)", true);
     private readonly CheckBox _chkCompile = NewCheck("Compile after convert", false);
     private readonly CheckBox _chkBuild = NewCheck("Full build (jar)", false);
-    private readonly CheckBox _chkDry = NewCheck("Dry run (preview only)", false);
-    private readonly Button _btnBrowseIn = NewButton("Browse...");
-    private readonly Button _btnBrowseOut = NewButton("Browse...");
-    private readonly Button _btnRun = NewButton("Convert");
-    private readonly Button _btnOpenOut = NewButton("Open output");
-    private readonly Button _btnClear = NewButton("Clear log");
-    private readonly ProgressBar _progress = new() { Style = ProgressBarStyle.Continuous };
+    private readonly CheckBox _chkDry = NewCheck("Dry run (preview only — no files written)", false);
+    private readonly Label _lblOptionsHint = new()
+    {
+        AutoSize = true,
+        ForeColor = Color.FromArgb(160, 170, 180),
+        Margin = new Padding(12, 6, 8, 4),
+        Text = "Uncheck Dry run to write files and optionally compile."
+    };
+    private readonly Button _btnBrowseIn = NewButton("Browse...", 110);
+    private readonly Button _btnBrowseOut = NewButton("Browse...", 110);
+    private readonly Button _btnRun = NewButton("Convert", 130);
+    private readonly Button _btnOpenOut = NewButton("Open output", 130);
+    private readonly Button _btnClear = NewButton("Clear log", 120);
+    private readonly ProgressBar _progress = new()
+    {
+        Style = ProgressBarStyle.Continuous,
+        Height = 22,
+        Margin = new Padding(8, 8, 0, 4),
+        Dock = DockStyle.Fill
+    };
     private readonly RichTextBox _log = new();
     private Process? _running;
     private System.Windows.Forms.Timer? _pollTimer;
     private string _lastOutput = "";
+    private bool _busy;
 
     public MainForm()
     {
-        Text = "RB MCreator Version Updater - NeoForge 26.2";
-        Size = new Size(860, 680);
-        MinimumSize = new Size(720, 540);
+        Text = "RB All Updater - NeoForge 26.2";
+        // ClientSize so DPI/title-bar never clips bottom controls
+        ClientSize = new Size(960, 720);
+        MinimumSize = new Size(820, 600);
         StartPosition = FormStartPosition.CenterScreen;
         BackColor = Color.FromArgb(32, 34, 40);
         ForeColor = Color.Gainsboro;
         Font = new Font("Segoe UI", 9.5f);
+        AutoScaleMode = AutoScaleMode.Dpi;
+        AutoScaleDimensions = new SizeF(96f, 96f);
+        Padding = new Padding(12);
 
-        var title = new Label
+        // ---- Header ----
+        var header = new TableLayoutPanel
         {
-            Text = "Convert MCreator / NeoForge 26.1.x  ->  Minecraft 26.2",
+            ColumnCount = 1,
+            RowCount = 2,
+            AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            Dock = DockStyle.Top,
+            Margin = new Padding(0, 0, 0, 8)
+        };
+        header.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
+        header.Controls.Add(new Label
+        {
+            Text = "RB All Updater — MCreator / ModDevGradle / NeoGradle  26.1.x  ->  26.2",
             Font = new Font("Segoe UI Semibold", 12f),
             ForeColor = Color.White,
-            Location = new Point(16, 12),
-            AutoSize = true
-        };
-        var sub = new Label
+            AutoSize = true,
+            Margin = new Padding(0, 0, 0, 2)
+        }, 0, 0);
+        header.Controls.Add(new Label
         {
-            Text = "Always writes to a new output folder. Your original project is never modified.",
+            Text = "Always writes to a new output folder. Original project is never modified. Works on hand-ported Gradle mods too.",
             ForeColor = Color.FromArgb(140, 200, 140),
-            Location = new Point(16, 40),
-            AutoSize = true
+            AutoSize = true,
+            Margin = new Padding(0, 0, 0, 8)
+        }, 0, 1);
+
+        // ---- Input / Output paths ----
+        var paths = new TableLayoutPanel
+        {
+            ColumnCount = 3,
+            RowCount = 2,
+            AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            Dock = DockStyle.Top,
+            Margin = new Padding(0, 0, 0, 10)
+        };
+        paths.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 110f));
+        paths.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
+        paths.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 120f));
+        paths.RowStyles.Add(new RowStyle(SizeType.Absolute, 36f));
+        paths.RowStyles.Add(new RowStyle(SizeType.Absolute, 36f));
+
+        paths.Controls.Add(FieldLabel("Input project"), 0, 0);
+        _txtInput.Dock = DockStyle.Fill;
+        _txtInput.Margin = new Padding(0, 4, 8, 4);
+        paths.Controls.Add(_txtInput, 1, 0);
+        _btnBrowseIn.Dock = DockStyle.Fill;
+        _btnBrowseIn.Margin = new Padding(0, 2, 0, 2);
+        paths.Controls.Add(_btnBrowseIn, 2, 0);
+
+        paths.Controls.Add(FieldLabel("Output folder"), 0, 1);
+        _txtOutput.Dock = DockStyle.Fill;
+        _txtOutput.Margin = new Padding(0, 4, 8, 4);
+        paths.Controls.Add(_txtOutput, 1, 1);
+        _btnBrowseOut.Dock = DockStyle.Fill;
+        _btnBrowseOut.Margin = new Padding(0, 2, 0, 2);
+        paths.Controls.Add(_btnBrowseOut, 2, 1);
+
+        // ---- Versions (FlowLayout — never overlaps) ----
+        var versions = new FlowLayoutPanel
+        {
+            FlowDirection = FlowDirection.LeftToRight,
+            WrapContents = true,
+            AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            Dock = DockStyle.Top,
+            Margin = new Padding(0, 0, 0, 8),
+            Padding = new Padding(0)
+        };
+        versions.Controls.Add(LabeledField("Minecraft", _txtMc, 90, "26.2"));
+        versions.Controls.Add(LabeledField("NeoForge", _txtNeo, 170, "26.2.0.32-beta"));
+        versions.Controls.Add(LabeledField("Mod version", _txtModVer, 110, ""));
+        versions.Controls.Add(new Label
+        {
+            Text = "(blank = auto)",
+            AutoSize = true,
+            ForeColor = Color.FromArgb(140, 150, 160),
+            Margin = new Padding(4, 10, 8, 4)
+        });
+
+        // ---- Options (each checkbox on its own flow row) ----
+        var options = new FlowLayoutPanel
+        {
+            FlowDirection = FlowDirection.TopDown,
+            WrapContents = false,
+            AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            Dock = DockStyle.Top,
+            Margin = new Padding(0, 0, 0, 8)
         };
 
-        Controls.Add(title);
-        Controls.Add(sub);
-
-        AddLabeledRow("Input project", 72, _txtInput, _btnBrowseIn);
-        AddLabeledRow("Output folder", 108, _txtOutput, _btnBrowseOut);
-
-        Controls.Add(MakeLabel("Minecraft", 16, 148, 80));
-        _txtMc.Location = new Point(100, 146);
-        _txtMc.Width = 90;
-        _txtMc.Text = "26.2";
-        Controls.Add(_txtMc);
-
-        Controls.Add(MakeLabel("NeoForge", 210, 148, 80));
-        _txtNeo.Location = new Point(290, 146);
-        _txtNeo.Width = 170;
-        _txtNeo.Text = "26.2.0.32-beta";
-        Controls.Add(_txtNeo);
-
-        Controls.Add(MakeLabel("Mod version", 480, 148, 90));
-        _txtModVer.Location = new Point(570, 146);
-        _txtModVer.Width = 100;
-        Controls.Add(_txtModVer);
-        Controls.Add(MakeLabel("(blank = auto)", 675, 148, 110));
-
-        _chkFetch.Location = new Point(16, 186);
-        _chkCompile.Location = new Point(320, 186);
-        _chkBuild.Location = new Point(500, 186);
-        _chkDry.Location = new Point(650, 186);
+        var optRow1 = new FlowLayoutPanel
+        {
+            FlowDirection = FlowDirection.LeftToRight,
+            WrapContents = true,
+            AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            Margin = new Padding(0)
+        };
+        _chkFetch.Margin = new Padding(0, 4, 24, 4);
+        _chkDry.Margin = new Padding(0, 4, 8, 4);
         _chkDry.ForeColor = Color.Khaki;
-        Controls.AddRange(new Control[] { _chkFetch, _chkCompile, _chkBuild, _chkDry });
+        optRow1.Controls.Add(_chkFetch);
+        optRow1.Controls.Add(_chkDry);
 
-        _btnRun.Location = new Point(16, 222);
-        _btnRun.Width = 120;
+        var optRow2 = new FlowLayoutPanel
+        {
+            FlowDirection = FlowDirection.LeftToRight,
+            WrapContents = true,
+            AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            Margin = new Padding(0)
+        };
+        _chkCompile.Margin = new Padding(0, 4, 24, 4);
+        _chkBuild.Margin = new Padding(0, 4, 16, 4);
+        optRow2.Controls.Add(_chkCompile);
+        optRow2.Controls.Add(_chkBuild);
+        optRow2.Controls.Add(_lblOptionsHint);
+
+        options.Controls.Add(optRow1);
+        options.Controls.Add(optRow2);
+
+        _chkDry.CheckedChanged += (_, _) => UpdateOptionStates();
+        UpdateOptionStates();
+
+        // ---- Actions ----
+        var actions = new TableLayoutPanel
+        {
+            ColumnCount = 4,
+            RowCount = 1,
+            AutoSize = false,
+            Height = 44,
+            Dock = DockStyle.Top,
+            Margin = new Padding(0, 0, 0, 8)
+        };
+        actions.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 140f));
+        actions.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 140f));
+        actions.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 130f));
+        actions.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
+        actions.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
+
+        _btnRun.Dock = DockStyle.Fill;
+        _btnRun.Margin = new Padding(0, 4, 8, 4);
         _btnRun.BackColor = Color.FromArgb(46, 120, 80);
         _btnRun.FlatAppearance.BorderColor = Color.FromArgb(70, 160, 100);
         _btnRun.Font = new Font("Segoe UI Semibold", 10f);
+        _btnRun.Height = 36;
 
-        _btnOpenOut.Location = new Point(150, 222);
-        _btnOpenOut.Width = 120;
+        _btnOpenOut.Dock = DockStyle.Fill;
+        _btnOpenOut.Margin = new Padding(0, 4, 8, 4);
         _btnOpenOut.Enabled = false;
+        _btnOpenOut.Height = 36;
 
-        _btnClear.Location = new Point(280, 222);
-        _btnClear.Width = 100;
+        _btnClear.Dock = DockStyle.Fill;
+        _btnClear.Margin = new Padding(0, 4, 8, 4);
+        _btnClear.Height = 36;
 
-        _progress.Location = new Point(400, 226);
-        _progress.Size = new Size(420, 20);
-        _progress.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
+        actions.Controls.Add(_btnRun, 0, 0);
+        actions.Controls.Add(_btnOpenOut, 1, 0);
+        actions.Controls.Add(_btnClear, 2, 0);
+        actions.Controls.Add(_progress, 3, 0);
 
-        Controls.AddRange(new Control[] { _btnRun, _btnOpenOut, _btnClear, _progress });
+        // ---- Log ----
+        var logHeader = new Label
+        {
+            Text = "Log",
+            AutoSize = true,
+            ForeColor = Color.Gainsboro,
+            Dock = DockStyle.Top,
+            Margin = new Padding(0, 4, 0, 4)
+        };
 
-        Controls.Add(MakeLabel("Log", 16, 262, 80));
-        _log.Location = new Point(16, 286);
-        _log.Size = new Size(810, 320);
-        _log.Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right;
+        _log.Dock = DockStyle.Fill;
         _log.BackColor = Color.FromArgb(22, 24, 28);
         _log.ForeColor = Color.Gainsboro;
         _log.Font = new Font("Consolas", 9f);
         _log.ReadOnly = true;
         _log.BorderStyle = BorderStyle.FixedSingle;
         _log.DetectUrls = false;
-        Controls.Add(_log);
+        _log.Margin = new Padding(0);
 
+        // Root: stacked top panels + fill log
+        var root = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            ColumnCount = 1,
+            RowCount = 7,
+            Padding = new Padding(4)
+        };
+        root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
+        root.RowStyles.Add(new RowStyle(SizeType.AutoSize)); // header
+        root.RowStyles.Add(new RowStyle(SizeType.AutoSize)); // paths
+        root.RowStyles.Add(new RowStyle(SizeType.AutoSize)); // versions
+        root.RowStyles.Add(new RowStyle(SizeType.AutoSize)); // options
+        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 48f)); // actions
+        root.RowStyles.Add(new RowStyle(SizeType.AutoSize)); // log header
+        root.RowStyles.Add(new RowStyle(SizeType.Percent, 100f)); // log
+
+        header.Dock = DockStyle.Fill;
+        paths.Dock = DockStyle.Fill;
+        versions.Dock = DockStyle.Fill;
+        options.Dock = DockStyle.Fill;
+        actions.Dock = DockStyle.Fill;
+        logHeader.Dock = DockStyle.Fill;
+
+        root.Controls.Add(header, 0, 0);
+        root.Controls.Add(paths, 0, 1);
+        root.Controls.Add(versions, 0, 2);
+        root.Controls.Add(options, 0, 3);
+        root.Controls.Add(actions, 0, 4);
+        root.Controls.Add(logHeader, 0, 5);
+        root.Controls.Add(_log, 0, 6);
+
+        Controls.Add(root);
+
+        // ---- Events ----
         _btnBrowseIn.Click += (_, _) =>
         {
             using var dlg = new FolderBrowserDialog
@@ -165,17 +322,11 @@ public sealed class MainForm : Form
         };
         _btnClear.Click += (_, _) => _log.Clear();
 
-        Resize += (_, _) =>
-        {
-            _log.Width = ClientSize.Width - 32;
-            _log.Height = ClientSize.Height - _log.Top - 16;
-            _progress.Width = Math.Max(100, ClientSize.Width - _progress.Left - 16);
-        };
-
         Shown += (_, _) =>
         {
             AppendLog("Ready. Choose an input project and output folder, then click Convert.", Color.Gray);
             AppendLog("Tip: output is suggested as <project>-26.2 next to the original.", Color.Gray);
+            AppendLog("Dry run = preview only (no writes). Leave it unchecked for a real conversion.", Color.Khaki);
             var tools = ResolveToolsRoot();
             AppendLog($"Tools root: {tools}", Color.DimGray);
             if (!File.Exists(Path.Combine(tools, "Convert-ToNeoForge262.ps1")))
@@ -198,26 +349,65 @@ public sealed class MainForm : Form
         };
     }
 
-    private void AddLabeledRow(string label, int y, TextBox text, Button browse)
-    {
-        Controls.Add(MakeLabel(label, 16, y, 110));
-        text.Location = new Point(130, y - 2);
-        text.Width = 560;
-        text.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
-        browse.Location = new Point(700, y - 4);
-        browse.Width = 110;
-        browse.Anchor = AnchorStyles.Top | AnchorStyles.Right;
-        Controls.Add(text);
-        Controls.Add(browse);
-    }
-
-    private static Label MakeLabel(string text, int x, int y, int w) => new()
+    private static Label FieldLabel(string text) => new()
     {
         Text = text,
-        Location = new Point(x, y),
-        Size = new Size(w, 22),
-        ForeColor = Color.Gainsboro
+        AutoSize = true,
+        ForeColor = Color.Gainsboro,
+        Anchor = AnchorStyles.Left,
+        Margin = new Padding(0, 10, 8, 4)
     };
+
+    private static Panel LabeledField(string label, TextBox box, int boxWidth, string defaultText)
+    {
+        var p = new FlowLayoutPanel
+        {
+            FlowDirection = FlowDirection.LeftToRight,
+            WrapContents = false,
+            AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            Margin = new Padding(0, 2, 16, 2)
+        };
+        p.Controls.Add(new Label
+        {
+            Text = label,
+            AutoSize = true,
+            ForeColor = Color.Gainsboro,
+            Margin = new Padding(0, 8, 8, 0)
+        });
+        box.Width = boxWidth;
+        box.Height = 26;
+        box.Margin = new Padding(0, 4, 0, 4);
+        if (!string.IsNullOrEmpty(defaultText))
+            box.Text = defaultText;
+        p.Controls.Add(box);
+        return p;
+    }
+
+    private void UpdateOptionStates()
+    {
+        var dry = _chkDry.Checked;
+        if (dry)
+        {
+            _chkCompile.Checked = false;
+            _chkBuild.Checked = false;
+            _lblOptionsHint.Text = "Dry run: preview only — no files written, compile/build skipped.";
+            _lblOptionsHint.ForeColor = Color.Khaki;
+        }
+        else
+        {
+            _lblOptionsHint.Text = "Real convert writes to Output. Optional compile/build needs JDK 25.";
+            _lblOptionsHint.ForeColor = Color.FromArgb(160, 170, 180);
+        }
+
+        if (!_busy)
+        {
+            _chkFetch.Enabled = true;
+            _chkDry.Enabled = true;
+            _chkCompile.Enabled = !dry;
+            _chkBuild.Enabled = !dry;
+        }
+    }
 
     private static TextBox NewTextBox() => new()
     {
@@ -234,14 +424,17 @@ public sealed class MainForm : Form
         ForeColor = Color.Gainsboro
     };
 
-    private static Button NewButton(string text) => new()
+    private static Button NewButton(string text, int minWidth = 100) => new()
     {
         Text = text,
         FlatStyle = FlatStyle.Flat,
         BackColor = Color.FromArgb(60, 64, 78),
         ForeColor = Color.White,
-        Height = 28,
-        Cursor = Cursors.Hand
+        Height = 32,
+        MinimumSize = new Size(minWidth, 32),
+        AutoSize = false,
+        Cursor = Cursors.Hand,
+        FlatAppearance = { BorderColor = Color.FromArgb(90, 96, 112) }
     };
 
     private static string Quote(string path) => path.Contains(' ') ? $"\"{path}\"" : path;
@@ -296,6 +489,7 @@ public sealed class MainForm : Form
 
     private void SetBusy(bool busy)
     {
+        _busy = busy;
         _btnRun.Enabled = !busy;
         _btnBrowseIn.Enabled = !busy;
         _btnBrowseOut.Enabled = !busy;
@@ -304,14 +498,22 @@ public sealed class MainForm : Form
         _txtNeo.Enabled = !busy;
         _txtMc.Enabled = !busy;
         _txtModVer.Enabled = !busy;
-        _chkFetch.Enabled = !busy;
-        _chkCompile.Enabled = !busy;
-        _chkBuild.Enabled = !busy;
-        _chkDry.Enabled = !busy;
         _progress.Style = busy ? ProgressBarStyle.Marquee : ProgressBarStyle.Continuous;
         _progress.MarqueeAnimationSpeed = busy ? 30 : 0;
         if (!busy) _progress.Value = 0;
         Cursor = busy ? Cursors.WaitCursor : Cursors.Default;
+
+        if (busy)
+        {
+            _chkFetch.Enabled = false;
+            _chkCompile.Enabled = false;
+            _chkBuild.Enabled = false;
+            _chkDry.Enabled = false;
+        }
+        else
+        {
+            UpdateOptionStates();
+        }
     }
 
     private void AppendLog(string text, Color color)
@@ -405,14 +607,18 @@ public sealed class MainForm : Form
             args.AddRange(new[] { "-ModVersion", Quote(modVer) });
         if (_chkFetch.Checked) args.Add("-FetchWrapper");
         if (_chkDry.Checked) args.Add("-DryRun");
-        if (_chkCompile.Checked) args.Add("-Compile");
-        if (_chkBuild.Checked) args.Add("-Build");
+        if (!_chkDry.Checked && _chkCompile.Checked) args.Add("-Compile");
+        if (!_chkDry.Checked && _chkBuild.Checked) args.Add("-Build");
 
         _log.Clear();
-        AppendLog("RB MCreator Version Updater", Color.White);
+        AppendLog("RB All Updater", Color.White);
         AppendLog($"Input : {inFull}", Color.LightSkyBlue);
         AppendLog($"Output: {outFull}  (original will not be modified)", Color.LightGreen);
         AppendLog($"Minecraft {mc} / NeoForge {neo}", Color.Khaki);
+        if (_chkDry.Checked)
+            AppendLog("Mode  : DRY RUN (preview only — no files written)", Color.Khaki);
+        else
+            AppendLog("Mode  : real conversion (writes to output folder)", Color.LightGreen);
         AppendLog("----------------------------------------", Color.Gray);
         AppendLog("Starting...", Color.Gainsboro);
 
@@ -484,7 +690,11 @@ public sealed class MainForm : Form
             if (code == 0)
             {
                 AppendLog("Finished successfully (exit 0).", Color.LightGreen);
-                if (!_chkDry.Checked)
+                if (_chkDry.Checked)
+                {
+                    AppendLog("Dry run complete — uncheck Dry run and Convert again to write files.", Color.Khaki);
+                }
+                else
                 {
                     AppendLog("Converted project: " + _lastOutput, Color.LightGreen);
                     AppendLog("Original input was not modified.", Color.LightGreen);

@@ -6,13 +6,13 @@
     <Nullable>enable</Nullable>
     <UseWindowsForms>true</UseWindowsForms>
     <ImplicitUsings>enable</ImplicitUsings>
-    <AssemblyName>RB-Mcreator-Version-Updater-Setup</AssemblyName>
+    <AssemblyName>RB-All-Updater-Setup</AssemblyName>
     <RootNamespace>RB.Mcreator.VersionUpdater.Setup</RootNamespace>
-    <Product>RB MCreator Version Updater Setup</Product>
+    <Product>RB All Updater Setup</Product>
     <Company>RobbieB1980</Company>
-    <Version>1.1.0</Version>
-    <FileVersion>1.1.0</FileVersion>
-    <Description>Installer for RB MCreator Version Updater (portable toolset)</Description>
+    <Version>1.3.0</Version>
+    <FileVersion>1.3.0</FileVersion>
+    <Description>Installer for RB All Updater (portable toolset)</Description>
   </PropertyGroup>
 
   <!-- Built by scripts/Build-Release.ps1 before publish -->

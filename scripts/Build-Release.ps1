@@ -1,13 +1,13 @@
-﻿<#
+<#
 .SYNOPSIS
-  Build portable package + Windows installer for RB MCreator Version Updater.
+  Build portable package + Windows installer for RB All Updater.
 
 .DESCRIPTION
   Produces:
-    dist/portable/RB-Mcreator-Version-Updater/   - fully portable folder
-    dist/RB-Mcreator-Version-Updater-Portable.zip
+    dist/portable/RB-All-Updater/   - fully portable folder
+    dist/RB-All-Updater-Portable.zip
     dist/portable-payload.zip                    - payload for Setup.exe
-    dist/RB-Mcreator-Version-Updater-Setup.exe   - GUI installer (self-contained)
+    dist/RB-All-Updater-Setup.exe   - GUI installer (self-contained)
 
 .EXAMPLE
   .\scripts\Build-Release.ps1
@@ -21,7 +21,7 @@ param(
 $ErrorActionPreference = 'Stop'
 $RepoRoot = Resolve-Path (Join-Path $PSScriptRoot '..')
 $Dist = Join-Path $RepoRoot 'dist'
-$PortableRoot = Join-Path $Dist 'portable\RB-Mcreator-Version-Updater'
+$PortableRoot = Join-Path $Dist 'portable\RB-All-Updater'
 $GuiProj = Join-Path $RepoRoot 'src\RB.Mcreator.VersionUpdater\RB.Mcreator.VersionUpdater.csproj'
 $SetupProj = Join-Path $RepoRoot 'src\RB.Mcreator.VersionUpdater.Setup\RB.Mcreator.VersionUpdater.Setup.csproj'
 
@@ -46,7 +46,9 @@ if ($LASTEXITCODE -ne 0) { throw "GUI publish failed" }
 
 Write-Host "==> Assembling portable folder" -ForegroundColor Cyan
 # EXE
-Copy-Item (Join-Path $guiOut 'RB-Mcreator-Version-Updater.exe') $PortableRoot -Force
+$guiExe = Join-Path $guiOut 'RB-All-Updater.exe'
+if (-not (Test-Path $guiExe)) { throw "GUI publish missing RB-All-Updater.exe" }
+Copy-Item $guiExe $PortableRoot -Force
 # tools next to exe (also already under publish-gui/tools from content copy)
 $toolsSrc = Join-Path $guiOut 'tools'
 if (Test-Path $toolsSrc) {
@@ -71,23 +73,24 @@ else {
 @'
 @echo off
 cd /d "%~dp0"
-start "" "%~dp0RB-Mcreator-Version-Updater.exe"
+start "" "%~dp0RB-All-Updater.exe"
 '@ | Set-Content (Join-Path $PortableRoot 'Start-Updater.bat') -Encoding ASCII
 
 Copy-Item (Join-Path $RepoRoot 'README.md') (Join-Path $PortableRoot 'README.md') -Force
 
 # LICENSE note
 @'
-RB MCreator Version Updater
+RB All Updater
 Copyright (c) RobbieB1980
 
+Converts MCreator, ModDevGradle, and NeoGradle 26.1.x projects to Minecraft 26.2.
 All Rights Reserved unless otherwise noted by the repository owner.
 '@ | Set-Content (Join-Path $PortableRoot 'LICENSE.txt') -Encoding UTF8
 
 Write-Host "==> Creating portable ZIP" -ForegroundColor Cyan
-$portableZip = Join-Path $Dist 'RB-Mcreator-Version-Updater-Portable.zip'
+$portableZip = Join-Path $Dist 'RB-All-Updater-Portable.zip'
 if (Test-Path $portableZip) { Remove-Item $portableZip -Force }
-Compress-Archive -Path (Join-Path $Dist 'portable\RB-Mcreator-Version-Updater') -DestinationPath $portableZip -Force
+Compress-Archive -Path (Join-Path $Dist 'portable\RB-All-Updater') -DestinationPath $portableZip -Force
 
 # Payload for installer (same content)
 $payloadZip = Join-Path $Dist 'portable-payload.zip'
@@ -111,9 +114,12 @@ dotnet publish $SetupProj `
 
 if ($LASTEXITCODE -ne 0) { throw "Setup publish failed" }
 
-$setupDest = Join-Path $Dist 'RB-Mcreator-Version-Updater-Setup.exe'
+$setupExe = Join-Path $setupOut 'RB-All-Updater-Setup.exe'
+if (-not (Test-Path -LiteralPath $setupExe)) {
+    throw "Setup publish succeeded but EXE not found: $setupExe"
+}
+$setupDest = Join-Path $Dist 'RB-All-Updater-Setup.exe'
 Copy-Item $setupExe $setupDest -Force
-# portable-payload.zip already lives in $Dist from earlier step
 
 Write-Host ""
 Write-Host "Build complete." -ForegroundColor Green
@@ -123,5 +129,5 @@ Write-Host "  Payload ZIP     : $payloadZip"
 Write-Host "  Setup EXE       : $setupDest  (payload embedded)"
 Write-Host ""
 Write-Host "Distribute either:" -ForegroundColor Yellow
-Write-Host "  - RB-Mcreator-Version-Updater-Setup.exe   (installs portable toolset)"
-Write-Host "  - RB-Mcreator-Version-Updater-Portable.zip (no install; run Start-Updater.bat)"
+Write-Host "  - RB-All-Updater-Setup.exe   (installs portable toolset)"
+Write-Host "  - RB-All-Updater-Portable.zip (no install; run Start-Updater.bat)"

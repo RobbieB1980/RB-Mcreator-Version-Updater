@@ -370,6 +370,145 @@ function Update-McreatorWorkspace {
     }
 }
 
+function Ensure-ClientItemDefinitions {
+    <#
+    .SYNOPSIS
+      MC 26.x requires assets/<namespace>/items/<id>.json client item defs that
+      point at models. Many 26.1 / MCreator / partial ports only ship models/item.
+      Scaffold missing items/*.json and normalize common parent paths.
+    #>
+    param(
+        [Parameter(Mandatory)][string]$ProjectRoot,
+        [switch]$DryRun
+    )
+
+    $assetsRoot = Join-Path $ProjectRoot 'src\main\resources\assets'
+    $created = 0
+    $existing = 0
+    $scanned = 0
+    $parentFixes = 0
+
+    if (-not (Test-Path $assetsRoot)) {
+        return [pscustomobject]@{ Created = 0; Existing = 0; Scanned = 0; ModelParentFixes = 0 }
+    }
+
+    foreach ($nsDir in Get-ChildItem -LiteralPath $assetsRoot -Directory -ErrorAction SilentlyContinue) {
+        $modelsItem = Join-Path $nsDir.FullName 'models\item'
+        if (-not (Test-Path $modelsItem)) { continue }
+
+        $itemsDir = Join-Path $nsDir.FullName 'items'
+        $ns = $nsDir.Name
+
+        foreach ($modelFile in Get-ChildItem -LiteralPath $modelsItem -Filter '*.json' -File -ErrorAction SilentlyContinue) {
+            $scanned++
+            $id = [System.IO.Path]::GetFileNameWithoutExtension($modelFile.Name)
+            $clientPath = Join-Path $itemsDir "$id.json"
+
+            # Normalize model parents for 26.x
+            $modelText = [System.IO.File]::ReadAllText($modelFile.FullName)
+            $origModel = $modelText
+            $modelText = $modelText -replace '"parent"\s*:\s*"item/generated"', '"parent": "minecraft:item/generated"'
+            $modelText = $modelText -replace '"parent"\s*:\s*"item/handheld"', '"parent": "minecraft:item/handheld"'
+            # template_spawn_egg removed in modern versions
+            if ($modelText -match '"parent"\s*:\s*"item/template_spawn_egg"' -or
+                $modelText -match '"parent"\s*:\s*"minecraft:item/template_spawn_egg"') {
+                # Prefer a same-namespace item texture if present, else leave generated without textures (still better than broken parent)
+                $fallbackTex = "$ns`:item/$id"
+                $texFile = Join-Path $nsDir.FullName "textures\item\$id.png"
+                if (-not (Test-Path $texFile)) {
+                    $anyItemTex = Get-ChildItem (Join-Path $nsDir.FullName 'textures\item') -Filter '*.png' -ErrorAction SilentlyContinue | Select-Object -First 1
+                    if ($anyItemTex) {
+                        $fallbackTex = "$ns`:item/$([System.IO.Path]::GetFileNameWithoutExtension($anyItemTex.Name))"
+                    }
+                }
+                $modelText = @"
+{
+  "parent": "minecraft:item/generated",
+  "textures": {
+    "layer0": "$fallbackTex"
+  }
+}
+"@
+            }
+            if ($modelText -ne $origModel) {
+                $parentFixes++
+                if (-not $DryRun) {
+                    [System.IO.File]::WriteAllText($modelFile.FullName, $modelText.TrimEnd() + "`r`n")
+                }
+            }
+
+            # Also fix bare block/cube parents under models/block
+            if (Test-Path (Join-Path $nsDir.FullName 'models\block')) {
+                # handled once per ns outside loop for efficiency - skip here
+            }
+
+            if (Test-Path $clientPath) {
+                $existing++
+                continue
+            }
+
+            # Point block-looking models at block model when parent is a block path
+            $modelRef = "$ns`:item/$id"
+            if ($modelText -match '"parent"\s*:\s*"' + [regex]::Escape($ns) + ':block/([^"]+)"') {
+                $modelRef = "$ns`:block/$($Matches[1])"
+            }
+            elseif ($id -match '^(block_|.*_block$)' -and (Test-Path (Join-Path $nsDir.FullName "models\block\$id.json"))) {
+                $modelRef = "$ns`:block/$id"
+            }
+            elseif (Test-Path (Join-Path $nsDir.FullName "models\block\$id.json")) {
+                # e.g. scratched_oak_log item model parents block — prefer block for 3D icon
+                if ($modelText -match ':block/') {
+                    if ($modelText -match '"parent"\s*:\s*"([^"]+:block/[^"]+)"') {
+                        $modelRef = $Matches[1]
+                    }
+                }
+            }
+
+            $clientJson = @"
+{
+  "model": {
+    "type": "minecraft:model",
+    "model": "$modelRef"
+  }
+}
+"@
+            $created++
+            if (-not $DryRun) {
+                if (-not (Test-Path $itemsDir)) {
+                    New-Item -ItemType Directory -Path $itemsDir -Force | Out-Null
+                }
+                [System.IO.File]::WriteAllText($clientPath, $clientJson.TrimEnd() + "`r`n")
+            }
+        }
+
+        # Fix bare block/* parents once per namespace
+        $blockModels = Join-Path $nsDir.FullName 'models\block'
+        if (Test-Path $blockModels) {
+            foreach ($bm in Get-ChildItem -LiteralPath $blockModels -Filter '*.json' -File -ErrorAction SilentlyContinue) {
+                $bt = [System.IO.File]::ReadAllText($bm.FullName)
+                $ob = $bt
+                $bt = $bt -replace '"parent"\s*:\s*"block/cube"', '"parent": "minecraft:block/cube"'
+                $bt = $bt -replace '"parent"\s*:\s*"block/cube_all"', '"parent": "minecraft:block/cube_all"'
+                $bt = $bt -replace '"parent"\s*:\s*"block/cube_column"', '"parent": "minecraft:block/cube_column"'
+                $bt = $bt -replace '"parent"\s*:\s*"block/cross"', '"parent": "minecraft:block/cross"'
+                if ($bt -ne $ob) {
+                    $parentFixes++
+                    if (-not $DryRun) {
+                        [System.IO.File]::WriteAllText($bm.FullName, $bt)
+                    }
+                }
+            }
+        }
+    }
+
+    return [pscustomobject]@{
+        Created           = $created
+        Existing          = $existing
+        Scanned           = $scanned
+        ModelParentFixes  = $parentFixes
+    }
+}
+
 function Install-GradleWrapper {
     param([string]$ProjectRoot)
 
@@ -381,6 +520,11 @@ function Install-GradleWrapper {
     }
 
     Write-Step 'Fetching Gradle wrapper from NeoForge 26.2 MDK'
+    if ($DryRun) {
+        Write-Info 'Dry run: would download MDK-26.2-NeoGradle and install gradlew / gradle-wrapper'
+        return
+    }
+
     $tmp = Join-Path $env:TEMP ("neoforge-mdk-26.2-" + [guid]::NewGuid().ToString('N'))
     New-Item -ItemType Directory -Path $tmp -Force | Out-Null
     try {
@@ -392,16 +536,14 @@ function Install-GradleWrapper {
         $mdk = Get-ChildItem $tmp -Directory | Where-Object { $_.Name -like 'MDK-*' } | Select-Object -First 1
         if (-not $mdk) { throw 'MDK extract failed' }
 
-        if (-not $DryRun) {
-            New-Item -ItemType Directory -Path (Join-Path $ProjectRoot 'gradle\wrapper') -Force | Out-Null
-            Copy-Item (Join-Path $mdk.FullName 'gradle\wrapper\*') (Join-Path $ProjectRoot 'gradle\wrapper') -Force
-            Copy-Item (Join-Path $mdk.FullName 'gradlew.bat') $ProjectRoot -Force
-            if (Test-Path (Join-Path $mdk.FullName 'gradlew')) {
-                Copy-Item (Join-Path $mdk.FullName 'gradlew') $ProjectRoot -Force
-            }
-            if ((Test-Path (Join-Path $mdk.FullName '.gitignore')) -and -not (Test-Path (Join-Path $ProjectRoot '.gitignore'))) {
-                Copy-Item (Join-Path $mdk.FullName '.gitignore') $ProjectRoot -Force
-            }
+        New-Item -ItemType Directory -Path (Join-Path $ProjectRoot 'gradle\wrapper') -Force | Out-Null
+        Copy-Item (Join-Path $mdk.FullName 'gradle\wrapper\*') (Join-Path $ProjectRoot 'gradle\wrapper') -Force
+        Copy-Item (Join-Path $mdk.FullName 'gradlew.bat') $ProjectRoot -Force
+        if (Test-Path (Join-Path $mdk.FullName 'gradlew')) {
+            Copy-Item (Join-Path $mdk.FullName 'gradlew') $ProjectRoot -Force
+        }
+        if ((Test-Path (Join-Path $mdk.FullName '.gitignore')) -and -not (Test-Path (Join-Path $ProjectRoot '.gitignore'))) {
+            Copy-Item (Join-Path $mdk.FullName '.gitignore') $ProjectRoot -Force
         }
         Write-Ok 'Wrapper installed from MDK-26.2-NeoGradle'
     }
@@ -628,10 +770,14 @@ if ($OutputPath) {
     if (-not [System.IO.Path]::IsPathRooted($OutputPath)) {
         $OutputPath = Join-Path (Get-Location) $OutputPath
     }
-    $ProjectRoot = Copy-ProjectToOutput -SourceRoot $SourceRoot -DestRoot $OutputPath -DryRun:$DryRun
+    $destFull = [System.IO.Path]::GetFullPath($OutputPath)
+    $ProjectRoot = Copy-ProjectToOutput -SourceRoot $SourceRoot -DestRoot $destFull -DryRun:$DryRun
     if ($DryRun) {
-        # Still validate / report as if we would convert the copy path
-        $ProjectRoot = [System.IO.Path]::GetFullPath($OutputPath)
+        # Preview reads must use source content — output is empty until a real run copies it.
+        # (Using the empty output path previously caused false "No src/main/java", wrong mod_id
+        # from the output folder name, and fake "wrapper installed" then compile exit 2.)
+        Write-Info "Dry run: previewing transforms against source; real run would write to: $destFull"
+        $ProjectRoot = $SourceRoot
     }
     else {
         $ProjectRoot = Resolve-ProjectRoot $ProjectRoot
@@ -644,14 +790,51 @@ else {
     $ProjectRoot = $SourceRoot
 }
 
-if (-not $ModVersion) { $ModVersion = "$MinecraftVersion.0" }
 $MinecraftVersionRange = "[$MinecraftVersion]"
 
+# Detect project style: MCreator workspace, ModDevGradle (hand/migration), NeoGradle MDK
+$buildGradleProbe = Join-Path $ProjectRoot 'build.gradle'
+$isModDevGradle = $false
+$isNeoGradle = $false
+$isMcreator = [bool](Get-ChildItem -LiteralPath $ProjectRoot -Filter '*.mcreator' -File -ErrorAction SilentlyContinue)
+if (Test-Path $buildGradleProbe) {
+    $bgProbe = [System.IO.File]::ReadAllText($buildGradleProbe)
+    $isModDevGradle = $bgProbe -match "net\.neoforged\.moddev"
+    $isNeoGradle = $bgProbe -match "net\.neoforged\.gradle\.userdev"
+}
+$projectKind = if ($isMcreator) { 'MCreator' }
+    elseif ($isModDevGradle) { 'ModDevGradle' }
+    elseif ($isNeoGradle) { 'NeoGradle' }
+    elseif (Test-Path $buildGradleProbe) { 'Gradle-other' }
+    else { 'scaffold-needed' }
+
+# --- gradle.properties (read first so we can preserve mod_version) ---
+Write-Step 'Updating gradle.properties'
+$propsFile = Join-Path $ProjectRoot 'gradle.properties'
+$props = Read-GradleProperties $propsFile
+$props = Infer-ModMetadata -ProjectRoot $ProjectRoot -Props $props
+
+if (-not $ModVersion) {
+    if ($props['mod_version']) {
+        # Keep author version; only retarget embedded 26.1.x strings to target MC
+        $ModVersion = $props['mod_version'] -replace '26\.1(?:\.\d+)?', $MinecraftVersion
+        $ModVersion = $ModVersion -replace 'mc26\.1(?:\.\d+)?', "mc$MinecraftVersion"
+    }
+    else {
+        $ModVersion = "$MinecraftVersion.0"
+    }
+}
+$props['mod_version'] = $ModVersion
+if ($props['mod_description'] -match '26\.1') {
+    $props['mod_description'] = $props['mod_description'] -replace '26\.1(?:\.\d+)?', $MinecraftVersion
+}
+
 Write-Host ""
-Write-Host "NeoForge 26.2 Converter" -ForegroundColor White
+Write-Host "RB All Updater - NeoForge 26.2 Converter" -ForegroundColor White
 Write-Host "  Source  : $SourceRoot"
 Write-Host "  Working : $ProjectRoot"
 if ($WorkingOnCopy) { Write-Host "  Mode    : copy-to-output (original preserved)" -ForegroundColor Green }
+Write-Host "  Project : $projectKind" -ForegroundColor Cyan
 Write-Host "  Target  : Minecraft $MinecraftVersion / NeoForge $NeoVersion"
 Write-Host "  Mod ver : $ModVersion"
 if ($DryRun) { Write-Host "  DryRun  : yes (no writes)" -ForegroundColor Yellow }
@@ -663,15 +846,6 @@ elseif ($SkipBackup) {
     Write-Info 'Backup skipped.'
 }
 
-# --- gradle.properties ---
-Write-Step 'Updating gradle.properties'
-$propsFile = Join-Path $ProjectRoot 'gradle.properties'
-$props = Read-GradleProperties $propsFile
-$props = Infer-ModMetadata -ProjectRoot $ProjectRoot -Props $props
-$props['mod_version'] = $ModVersion
-if ($props['mod_description'] -match '26\.1') {
-    $props['mod_description'] = $props['mod_description'] -replace '26\.1(?:\.\d+)?', $MinecraftVersion
-}
 Write-GradlePropertiesFile -File $propsFile -Props $props `
     -MinecraftVersion $MinecraftVersion `
     -MinecraftVersionRange $MinecraftVersionRange `
@@ -693,12 +867,20 @@ if (-not $SkipGradleScaffold) {
         }
         $content = Expand-Template (Join-Path $Templates 'build.gradle.template') $tokens
         if (-not $DryRun) { [System.IO.File]::WriteAllText($buildGradle, $content) }
-        Write-Ok 'Created build.gradle from template'
+        Write-Ok 'Created build.gradle from NeoGradle MDK template (MCreator-style scaffold)'
     }
     else {
-        $changed = Update-ExistingBuildGradle -File $buildGradle -MinecraftVersion $MinecraftVersion -NeoGradleVersion $NeoGradleVersion
-        if ($changed) { Write-Ok 'Patched existing build.gradle (NeoGradle / Java 25)' }
-        else { Write-Info 'build.gradle present - left mostly as-is (versions live in gradle.properties)' }
+        # Never replace ModDevGradle buildscripts with NeoGradle templates
+        if ($isModDevGradle) {
+            $changed = Update-ExistingBuildGradle -File $buildGradle -MinecraftVersion $MinecraftVersion -NeoGradleVersion $NeoGradleVersion
+            if ($changed) { Write-Ok 'Patched ModDevGradle build.gradle (Java toolchain / comments)' }
+            else { Write-Info 'ModDevGradle build.gradle present - left as-is (versions in gradle.properties)' }
+        }
+        else {
+            $changed = Update-ExistingBuildGradle -File $buildGradle -MinecraftVersion $MinecraftVersion -NeoGradleVersion $NeoGradleVersion
+            if ($changed) { Write-Ok 'Patched existing build.gradle (NeoGradle / Java 25)' }
+            else { Write-Info 'build.gradle present - left mostly as-is (versions live in gradle.properties)' }
+        }
     }
 
     if (-not (Test-Path $settingsGradle)) {
@@ -708,13 +890,38 @@ if (-not $SkipGradleScaffold) {
         Write-Ok 'Created settings.gradle from template'
     }
     else {
-        # Ensure NeoForged maven is present
         $sg = [System.IO.File]::ReadAllText($settingsGradle)
         if ($sg -notmatch 'maven\.neoforged\.net') {
-            Write-Warn2 'settings.gradle missing maven.neoforged.net - consider replacing with template'
+            # Inject NeoForged maven into pluginManagement.repositories when possible
+            if ($sg -match '(?s)(pluginManagement\s*\{\s*repositories\s*\{)') {
+                $sg2 = [regex]::Replace(
+                    $sg,
+                    '(pluginManagement\s*\{\s*repositories\s*\{)',
+                    "`$1`r`n        maven { url = 'https://maven.neoforged.net/releases' }",
+                    1
+                )
+                if ($sg2 -ne $sg -and -not $DryRun) {
+                    [System.IO.File]::WriteAllText($settingsGradle, $sg2)
+                }
+                Write-Ok 'Injected maven.neoforged.net into settings.gradle pluginManagement'
+            }
+            else {
+                Write-Warn2 'settings.gradle missing maven.neoforged.net - add it if plugin resolve fails'
+            }
         }
         else {
-            Write-Info 'settings.gradle OK'
+            Write-Info 'settings.gradle OK (NeoForged maven present)'
+        }
+        # Bump rootProject.name 26.1 -> target when present
+        if ($sg -match "rootProject\.name\s*=\s*'[^']*26\.1[^']*'") {
+            $sg3 = [regex]::Replace($sg, "(rootProject\.name\s*=\s*')([^']*?)26\.1(?:\.\d+)?([^']*')", "`${1}`${2}$MinecraftVersion`${3}")
+            if ($sg3 -ne $sg -and -not $DryRun) {
+                # re-read if we already wrote neo maven
+                $current = if (Test-Path $settingsGradle) { [System.IO.File]::ReadAllText($settingsGradle) } else { $sg }
+                $sg3 = [regex]::Replace($current, "(rootProject\.name\s*=\s*')([^']*?)26\.1(?:\.\d+)?([^']*')", "`${1}`${2}$MinecraftVersion`${3}")
+                [System.IO.File]::WriteAllText($settingsGradle, $sg3)
+            }
+            Write-Ok "Updated rootProject.name for $MinecraftVersion"
         }
     }
 }
@@ -729,17 +936,41 @@ else {
     }
 }
 
-# --- mods.toml ---
+# --- mods.toml (MDG uses src/main/templates; MCreator/NeoGradle use resources) ---
 Write-Step 'Updating neoforge.mods.toml'
-$tomlPath = Join-Path $ProjectRoot 'src\main\resources\META-INF\neoforge.mods.toml'
-$tomlResult = Update-ModsToml -TomlPath $tomlPath `
-    -TemplatePath (Join-Path $Templates 'neoforge.mods.toml.template') `
-    -Props $props `
-    -NeoVersion $NeoVersion `
-    -MinecraftVersion $MinecraftVersion `
-    -MinecraftVersionRange $MinecraftVersionRange `
-    -ForceTemplate:$ForceTomlTemplate
-Write-Ok "neoforge.mods.toml: $tomlResult"
+$tomlTemplatePath = Join-Path $ProjectRoot 'src\main\templates\META-INF\neoforge.mods.toml'
+$tomlResourcesPath = Join-Path $ProjectRoot 'src\main\resources\META-INF\neoforge.mods.toml'
+$tomlPaths = @()
+if (Test-Path $tomlTemplatePath) {
+    $tomlPaths += $tomlTemplatePath
+    Write-Info 'ModDevGradle / template-style mods.toml detected (src/main/templates)'
+}
+if ((Test-Path $tomlResourcesPath) -or (-not (Test-Path $tomlTemplatePath))) {
+    # Only write resources path when templates are absent, or when both already exist (patch both)
+    if (Test-Path $tomlResourcesPath) {
+        $tomlPaths += $tomlResourcesPath
+    }
+    elseif (-not (Test-Path $tomlTemplatePath)) {
+        $tomlPaths += $tomlResourcesPath
+    }
+}
+if ($tomlPaths.Count -eq 0) {
+    $tomlPaths = @($tomlResourcesPath)
+}
+
+foreach ($tomlPath in $tomlPaths) {
+    # Never force-write our scaffold template over an MDG project that already has templates
+    $force = $ForceTomlTemplate -and -not (Test-Path $tomlTemplatePath)
+    $tomlResult = Update-ModsToml -TomlPath $tomlPath `
+        -TemplatePath (Join-Path $Templates 'neoforge.mods.toml.template') `
+        -Props $props `
+        -NeoVersion $NeoVersion `
+        -MinecraftVersion $MinecraftVersion `
+        -MinecraftVersionRange $MinecraftVersionRange `
+        -ForceTemplate:$force
+    $relToml = $tomlPath.Substring($ProjectRoot.Length).TrimStart('\', '/')
+    Write-Ok "${relToml}: $tomlResult"
+}
 
 # --- pack.mcmeta ---
 Write-Step 'Updating pack.mcmeta'
@@ -776,6 +1007,22 @@ else {
     Write-Info 'Java transforms skipped'
 }
 
+# --- Client items (MC 26.x requires assets/<ns>/items/<id>.json) ---
+Write-Step 'Ensuring client item definitions (items/*.json)'
+$clientItemResult = Ensure-ClientItemDefinitions -ProjectRoot $ProjectRoot -DryRun:$DryRun
+if ($clientItemResult.Created -gt 0) {
+    Write-Ok "Created $($clientItemResult.Created) missing client item file(s)"
+}
+elseif ($clientItemResult.Scanned -eq 0) {
+    Write-Info 'No models/item found - skipped client items'
+}
+else {
+    Write-Info "Client items OK ($($clientItemResult.Existing) already present)"
+}
+if ($clientItemResult.ModelParentFixes -gt 0) {
+    Write-Ok "Fixed $($clientItemResult.ModelParentFixes) model parent path(s) (minecraft: namespace / spawn egg)"
+}
+
 # --- Summary notes ---
 Write-Step 'Done'
 $summary = @"
@@ -799,6 +1046,11 @@ Known automatic Java transforms:
   - drawIndexed 4-arg (MCreator sky)    =>  5-arg form
   - setVertexBuffer(i, buf)             =>  setVertexBuffer(i, buf.slice())
   - writeTransform(modelViewStack,      =>  writeTransform(new Matrix4f(modelViewStack),
+  - pos.getCenter()                     =>  Vec3.atCenterOf(pos)
+
+Also auto-scaffolds missing assets/<ns>/items/*.json client item defs (MC 26.x).
+
+Supports: MCreator workspaces, NeoGradle MDK, ModDevGradle hand ports.
 
 Converter path: $ToolRoot
 "@
@@ -806,23 +1058,29 @@ Write-Host $summary -ForegroundColor Gray
 
 # --- optional compile/build ---
 if ($Compile -or $Build) {
-    $gradlew = Join-Path $ProjectRoot 'gradlew.bat'
-    if (-not (Test-Path $gradlew)) {
-        Write-Warn2 'Cannot compile: gradlew.bat missing. Use -FetchWrapper.'
-        exit 2
+    if ($DryRun) {
+        $task = if ($Build) { 'build' } else { 'compileJava' }
+        Write-Info "Skipping Gradle $task during dry run (no files written). Re-run without -DryRun to compile."
     }
-    $task = if ($Build) { 'build' } else { 'compileJava' }
-    Write-Step "Running $task"
-    Push-Location $ProjectRoot
-    try {
-        & .\gradlew.bat $task --no-daemon
-        if ($LASTEXITCODE -ne 0) {
-            throw "Gradle $task failed with exit code $LASTEXITCODE"
+    else {
+        $gradlew = Join-Path $ProjectRoot 'gradlew.bat'
+        if (-not (Test-Path $gradlew)) {
+            Write-Warn2 'Cannot compile: gradlew.bat missing. Use -FetchWrapper.'
+            exit 2
         }
-        Write-Ok "Gradle $task succeeded"
-    }
-    finally {
-        Pop-Location
+        $task = if ($Build) { 'build' } else { 'compileJava' }
+        Write-Step "Running $task"
+        Push-Location $ProjectRoot
+        try {
+            & .\gradlew.bat $task --no-daemon
+            if ($LASTEXITCODE -ne 0) {
+                throw "Gradle $task failed with exit code $LASTEXITCODE"
+            }
+            Write-Ok "Gradle $task succeeded"
+        }
+        finally {
+            Pop-Location
+        }
     }
 }
 

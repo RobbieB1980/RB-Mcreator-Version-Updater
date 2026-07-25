@@ -63,23 +63,39 @@ function Suggest-OutputPath([string]$InputPath) {
 }
 
 function Set-Busy([bool]$Busy) {
+    $script:uiBusy = $Busy
     $btnRun.Enabled = -not $Busy
     $btnBrowseIn.Enabled = -not $Busy
     $btnBrowseOut.Enabled = -not $Busy
-    $btnOpenOut.Enabled = -not $Busy
+    # Open output only when not busy and a result exists (caller may re-enable)
+    if ($Busy) { $btnOpenOut.Enabled = $false }
     $txtInput.Enabled = -not $Busy
     $txtOutput.Enabled = -not $Busy
     $txtNeo.Enabled = -not $Busy
     $txtMc.Enabled = -not $Busy
     $txtModVer.Enabled = -not $Busy
-    $chkFetch.Enabled = -not $Busy
-    $chkCompile.Enabled = -not $Busy
-    $chkBuild.Enabled = -not $Busy
-    $chkDry.Enabled = -not $Busy
     $progress.Style = if ($Busy) { 'Marquee' } else { 'Continuous' }
     $progress.MarqueeAnimationSpeed = if ($Busy) { 30 } else { 0 }
     if (-not $Busy) { $progress.Value = 0 }
     $form.Cursor = if ($Busy) { [System.Windows.Forms.Cursors]::WaitCursor } else { [System.Windows.Forms.Cursors]::Default }
+
+    if ($Busy) {
+        $chkFetch.Enabled = $false
+        $chkCompile.Enabled = $false
+        $chkBuild.Enabled = $false
+        $chkDry.Enabled = $false
+    }
+    else {
+        $chkFetch.Enabled = $true
+        $chkDry.Enabled = $true
+        if (Get-Command Update-OptionStates -ErrorAction SilentlyContinue) {
+            Update-OptionStates
+        }
+        else {
+            $chkCompile.Enabled = -not $chkDry.Checked
+            $chkBuild.Enabled = -not $chkDry.Checked
+        }
+    }
 }
 
 function Browse-Folder([string]$Description, [string]$SelectedPath) {
@@ -166,8 +182,9 @@ function Start-Conversion {
     )
     if ($modVer) { $argList += @('-ModVersion', $modVer) }
     if ($chkDry.Checked) { $argList += '-DryRun' }
-    if ($chkCompile.Checked) { $argList += '-Compile' }
-    if ($chkBuild.Checked) { $argList += '-Build' }
+    # Compile/build only on real runs
+    if (-not $chkDry.Checked -and $chkCompile.Checked) { $argList += '-Compile' }
+    if (-not $chkDry.Checked -and $chkBuild.Checked) { $argList += '-Build' }
     # FetchWrapper always on for GUI convenience when building/compiling; always pass it
     # (already added). User can uncheck via not compiling - still useful for scaffold.
 
@@ -181,6 +198,12 @@ function Start-Conversion {
     Append-Log "Input : $inFull" ([System.Drawing.Color]::LightSkyBlue)
     Append-Log "Output: $outFull  (original will not be modified)" ([System.Drawing.Color]::LightGreen)
     Append-Log "Minecraft $mc / NeoForge $neo" ([System.Drawing.Color]::Khaki)
+    if ($chkDry.Checked) {
+        Append-Log "Mode  : DRY RUN (preview only — no files written)" ([System.Drawing.Color]::Khaki)
+    }
+    else {
+        Append-Log "Mode  : real conversion (writes to output folder)" ([System.Drawing.Color]::LightGreen)
+    }
     Append-Log "----------------------------------------" ([System.Drawing.Color]::Gray)
     Append-Log "Starting..." ([System.Drawing.Color]::Gainsboro)
 
@@ -243,7 +266,10 @@ function Start-Conversion {
             Append-Log "----------------------------------------" ([System.Drawing.Color]::Gray)
             if ($code -eq 0) {
                 Append-Log "Finished successfully (exit 0)." ([System.Drawing.Color]::LightGreen)
-                if (-not $chkDry.Checked) {
+                if ($chkDry.Checked) {
+                    Append-Log "Dry run complete — uncheck Dry run and Convert again to write files." ([System.Drawing.Color]::Khaki)
+                }
+                else {
                     Append-Log "Converted project: $script:lastOutput" ([System.Drawing.Color]::LightGreen)
                     Append-Log "Original input was not modified." ([System.Drawing.Color]::LightGreen)
                     $btnOpenOut.Enabled = $true
@@ -263,8 +289,8 @@ function Start-Conversion {
 
 $form = New-Object System.Windows.Forms.Form
 $form.Text = 'RB MCreator Version Updater - NeoForge 26.2'
-$form.Size = New-Object System.Drawing.Size(820, 640)
-$form.MinimumSize = New-Object System.Drawing.Size(700, 520)
+$form.Size = New-Object System.Drawing.Size(900, 720)
+$form.MinimumSize = New-Object System.Drawing.Size(780, 600)
 $form.StartPosition = 'CenterScreen'
 $form.BackColor = [System.Drawing.Color]::FromArgb(32, 34, 40)
 $form.ForeColor = [System.Drawing.Color]::Gainsboro
@@ -275,6 +301,15 @@ function New-Label([string]$Text, [int]$X, [int]$Y, [int]$W = 120) {
     $l.Text = $Text
     $l.Location = New-Object System.Drawing.Point($X, $Y)
     $l.Size = New-Object System.Drawing.Size($W, 22)
+    $l.ForeColor = [System.Drawing.Color]::Gainsboro
+    return $l
+}
+
+function New-AutoLabel([string]$Text, [int]$X, [int]$Y) {
+    $l = New-Object System.Windows.Forms.Label
+    $l.Text = $Text
+    $l.Location = New-Object System.Drawing.Point($X, $Y)
+    $l.AutoSize = $true
     $l.ForeColor = [System.Drawing.Color]::Gainsboro
     return $l
 }
@@ -333,82 +368,111 @@ $btnBrowseOut = New-Button 'Browse...' 680 104 100
 $form.Controls.Add($btnBrowseOut)
 
 # Versions row
-$form.Controls.Add((New-Label 'Minecraft' 16 148 80))
-$txtMc = New-TextBox 100 146 90
+$form.Controls.Add((New-AutoLabel 'Minecraft' 16 150))
+$txtMc = New-TextBox 100 148 80
 $txtMc.Text = '26.2'
 $form.Controls.Add($txtMc)
 
-$form.Controls.Add((New-Label 'NeoForge' 210 148 80))
-$txtNeo = New-TextBox 290 146 160
+$form.Controls.Add((New-AutoLabel 'NeoForge' 200 150))
+$txtNeo = New-TextBox 280 148 160
 $txtNeo.Text = '26.2.0.32-beta'
 $form.Controls.Add($txtNeo)
 
-$form.Controls.Add((New-Label 'Mod version' 470 148 90))
-$txtModVer = New-TextBox 560 146 100
+$form.Controls.Add((New-AutoLabel 'Mod version' 460 150))
+$txtModVer = New-TextBox 555 148 100
 $txtModVer.Text = ''
 $form.Controls.Add($txtModVer)
-$form.Controls.Add((New-Label '(blank = auto)' 665 148 110))
+$form.Controls.Add((New-AutoLabel '(blank = auto)' 665 150))
 
-# Options
+# Options — two rows so labels never overlap
 $chkFetch = New-Object System.Windows.Forms.CheckBox
 $chkFetch.Text = 'Fetch Gradle wrapper (recommended)'
 $chkFetch.Checked = $true
 $chkFetch.Location = New-Object System.Drawing.Point(16, 186)
-$chkFetch.Size = New-Object System.Drawing.Size(280, 22)
+$chkFetch.AutoSize = $true
 $chkFetch.ForeColor = [System.Drawing.Color]::Gainsboro
 $form.Controls.Add($chkFetch)
+
+$chkDry = New-Object System.Windows.Forms.CheckBox
+$chkDry.Text = 'Dry run (preview only — no files written)'
+$chkDry.Checked = $false
+$chkDry.Location = New-Object System.Drawing.Point(320, 186)
+$chkDry.AutoSize = $true
+$chkDry.ForeColor = [System.Drawing.Color]::Khaki
+$form.Controls.Add($chkDry)
 
 $chkCompile = New-Object System.Windows.Forms.CheckBox
 $chkCompile.Text = 'Compile after convert'
 $chkCompile.Checked = $false
-$chkCompile.Location = New-Object System.Drawing.Point(310, 186)
-$chkCompile.Size = New-Object System.Drawing.Size(170, 22)
+$chkCompile.Location = New-Object System.Drawing.Point(16, 214)
+$chkCompile.AutoSize = $true
 $chkCompile.ForeColor = [System.Drawing.Color]::Gainsboro
 $form.Controls.Add($chkCompile)
 
 $chkBuild = New-Object System.Windows.Forms.CheckBox
 $chkBuild.Text = 'Full build (jar)'
 $chkBuild.Checked = $false
-$chkBuild.Location = New-Object System.Drawing.Point(490, 186)
-$chkBuild.Size = New-Object System.Drawing.Size(140, 22)
+$chkBuild.Location = New-Object System.Drawing.Point(220, 214)
+$chkBuild.AutoSize = $true
 $chkBuild.ForeColor = [System.Drawing.Color]::Gainsboro
 $form.Controls.Add($chkBuild)
 
-$chkDry = New-Object System.Windows.Forms.CheckBox
-$chkDry.Text = 'Dry run (preview only)'
-$chkDry.Checked = $false
-$chkDry.Location = New-Object System.Drawing.Point(640, 186)
-$chkDry.Size = New-Object System.Drawing.Size(150, 22)
-$chkDry.ForeColor = [System.Drawing.Color]::Khaki
-$form.Controls.Add($chkDry)
+$lblOptionsHint = New-Object System.Windows.Forms.Label
+$lblOptionsHint.Text = 'Uncheck Dry run to write files and optionally compile.'
+$lblOptionsHint.Location = New-Object System.Drawing.Point(400, 214)
+$lblOptionsHint.AutoSize = $true
+$lblOptionsHint.ForeColor = [System.Drawing.Color]::FromArgb(160, 170, 180)
+$form.Controls.Add($lblOptionsHint)
+
+function Update-OptionStates {
+    if ($chkDry.Checked) {
+        $chkCompile.Checked = $false
+        $chkBuild.Checked = $false
+        $chkCompile.Enabled = $false
+        $chkBuild.Enabled = $false
+        $lblOptionsHint.Text = 'Dry run: preview only — no files written, compile/build skipped.'
+        $lblOptionsHint.ForeColor = [System.Drawing.Color]::Khaki
+    }
+    else {
+        if (-not $script:uiBusy) {
+            $chkCompile.Enabled = $true
+            $chkBuild.Enabled = $true
+        }
+        $lblOptionsHint.Text = 'Real convert writes to Output. Optional compile/build needs JDK 25.'
+        $lblOptionsHint.ForeColor = [System.Drawing.Color]::FromArgb(160, 170, 180)
+    }
+}
+$script:uiBusy = $false
+$chkDry.Add_CheckedChanged({ Update-OptionStates })
+Update-OptionStates
 
 # Actions
-$btnRun = New-Button 'Convert' 16 222 120
+$btnRun = New-Button 'Convert' 16 252 120
 $btnRun.BackColor = [System.Drawing.Color]::FromArgb(46, 120, 80)
 $btnRun.FlatAppearance.BorderColor = [System.Drawing.Color]::FromArgb(70, 160, 100)
 $btnRun.Font = New-Object System.Drawing.Font('Segoe UI Semibold', 10)
 $form.Controls.Add($btnRun)
 
-$btnOpenOut = New-Button 'Open output' 150 222 120
+$btnOpenOut = New-Button 'Open output' 150 252 120
 $btnOpenOut.Enabled = $false
 $form.Controls.Add($btnOpenOut)
 
-$btnClear = New-Button 'Clear log' 280 222 100
+$btnClear = New-Button 'Clear log' 280 252 100
 $form.Controls.Add($btnClear)
 
 $progress = New-Object System.Windows.Forms.ProgressBar
-$progress.Location = New-Object System.Drawing.Point(400, 226)
-$progress.Size = New-Object System.Drawing.Size(380, 20)
+$progress.Location = New-Object System.Drawing.Point(400, 256)
+$progress.Size = New-Object System.Drawing.Size(460, 20)
 $progress.Style = 'Continuous'
 $form.Controls.Add($progress)
 
 # Log
-$lblLog = New-Label 'Log' 16 262 80
+$lblLog = New-Label 'Log' 16 292 80
 $form.Controls.Add($lblLog)
 
 $txtLog = New-Object System.Windows.Forms.RichTextBox
-$txtLog.Location = New-Object System.Drawing.Point(16, 286)
-$txtLog.Size = New-Object System.Drawing.Size(764, 290)
+$txtLog.Location = New-Object System.Drawing.Point(16, 316)
+$txtLog.Size = New-Object System.Drawing.Size(850, 340)
 $txtLog.Anchor = 'Top,Bottom,Left,Right'
 $txtLog.BackColor = [System.Drawing.Color]::FromArgb(22, 24, 28)
 $txtLog.ForeColor = [System.Drawing.Color]::Gainsboro

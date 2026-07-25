@@ -11,7 +11,8 @@ function Get-JavaApiTransformNames {
         'drawIndexed-4arg-to-5arg-baseVertex',
         'setVertexBuffer-slice',
         'writeTransform-Matrix4f-copy',
-        'getSequentialBuffer-PrimitiveTopology'
+        'getSequentialBuffer-PrimitiveTopology',
+        'BlockPos.getCenter-to-Vec3.atCenterOf'
     )
 }
 
@@ -40,6 +41,7 @@ function Invoke-SingleFileTransforms {
     $needsPrimitiveTopology = $false
     $needsOptional = $false
     $needsMatrix4f = $false
+    $needsVec3 = $false
     $result = $Text
 
     # 1) emissiveRendering((bs, br, bp) ->  =>  emissiveRendering(bs ->
@@ -131,6 +133,27 @@ function Invoke-SingleFileTransforms {
         $result = $next
     }
 
+    # 11) BlockPos.getCenter() removed in 26.2 => Vec3.atCenterOf(pos)
+    #     Also handle chained: pos.getCenter() in AABB.ofSize etc.
+    $next = [regex]::Replace(
+        $result,
+        '(?<![\w.])([a-zA-Z_]\w*(?:\.\w+)*)\.getCenter\(\)',
+        {
+            param($m)
+            $recv = $m.Groups[1].Value
+            # Skip if already Vec3.atCenterOf(...)
+            if ($recv -match 'atCenterOf$') { return $m.Value }
+            return "Vec3.atCenterOf($recv)"
+        }
+    )
+    # idempotent: Vec3.atCenterOf(Vec3.atCenterOf(x))
+    $next = [regex]::Replace($next, 'Vec3\.atCenterOf\(\s*Vec3\.atCenterOf\(([^)]+)\)\s*\)', 'Vec3.atCenterOf($1)')
+    if ($next -ne $result) {
+        $hits.Add('BlockPos.getCenter-to-Vec3.atCenterOf') | Out-Null
+        $needsVec3 = $true
+        $result = $next
+    }
+
     if ($hits.Count -eq 0) {
         return [pscustomobject]@{ Text = $Text; Hits = @(); Changed = $false }
     }
@@ -143,6 +166,9 @@ function Invoke-SingleFileTransforms {
     }
     if ($needsMatrix4f -and $result -notmatch 'import org\.joml\.Matrix4f;') {
         $result = Add-JavaImport -Source $result -Import 'org.joml.Matrix4f'
+    }
+    if ($needsVec3 -and $result -notmatch 'import net\.minecraft\.world\.phys\.Vec3;') {
+        $result = Add-JavaImport -Source $result -Import 'net.minecraft.world.phys.Vec3'
     }
     if ($result -match 'import java\.util\.OptionalInt;' -and $result -notmatch 'OptionalInt\.') {
         $result = $result -replace "(?m)^import java\.util\.OptionalInt;\r?\n", ''
