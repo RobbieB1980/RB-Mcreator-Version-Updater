@@ -16,6 +16,10 @@
 .PARAMETER Path
     Root of the mod project (folder containing src/ and/or *.mcreator).
 
+.PARAMETER OutputPath
+    Optional destination folder. When set, the project is copied here first and
+    conversion runs only on the copy (original Path is never modified).
+
 .PARAMETER MinecraftVersion
     Target Minecraft version. Default: 26.2
 
@@ -50,6 +54,9 @@
     .\Convert-ToNeoForge262.ps1 -Path "D:\mods\MyMod"
 
 .EXAMPLE
+    .\Convert-ToNeoForge262.ps1 -Path "D:\mods\MyMod" -OutputPath "D:\mods\MyMod-26.2"
+
+.EXAMPLE
     .\Convert-ToNeoForge262.ps1 -Path ".\othermod" -NeoVersion "26.2.0.32-beta" -DryRun
 
 .EXAMPLE
@@ -59,6 +66,8 @@
 param(
     [Parameter(Mandatory = $true, Position = 0)]
     [string]$Path,
+
+    [string]$OutputPath = '',
 
     [string]$MinecraftVersion = '26.2',
     [string]$NeoVersion = '26.2.0.32-beta',
@@ -531,11 +540,108 @@ function Update-ExistingBuildGradle {
     return ($text -ne $original)
 }
 
+function Copy-ProjectToOutput {
+    param(
+        [Parameter(Mandatory)][string]$SourceRoot,
+        [Parameter(Mandatory)][string]$DestRoot,
+        [switch]$DryRun
+    )
+
+    $SourceRoot = [System.IO.Path]::GetFullPath($SourceRoot)
+    $DestRoot = [System.IO.Path]::GetFullPath($DestRoot)
+
+    if ($SourceRoot.TrimEnd('\') -ieq $DestRoot.TrimEnd('\')) {
+        throw "OutputPath must be different from Path (refusing to overwrite the original)."
+    }
+    if ($DestRoot.StartsWith($SourceRoot + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase) -or
+        $DestRoot.StartsWith($SourceRoot + [IO.Path]::AltDirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) {
+        throw "OutputPath cannot be inside the input project folder."
+    }
+    if ($SourceRoot.StartsWith($DestRoot + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase) -or
+        $SourceRoot.StartsWith($DestRoot + [IO.Path]::AltDirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) {
+        throw "Input Path cannot be inside OutputPath."
+    }
+
+    # Skip heavy / regenerable trees
+    $excludeDirNames = [System.Collections.Generic.HashSet[string]]::new(
+        [string[]]@('build', 'run', '.gradle', '.converter-backups', 'bin', 'out', 'repo', 'node_modules', '.idea'),
+        [StringComparer]::OrdinalIgnoreCase
+    )
+
+    Write-Step "Copying project to output (original will not be modified)"
+    Write-Info "From: $SourceRoot"
+    Write-Info "To  : $DestRoot"
+
+    if ($DryRun) {
+        Write-Info 'Dry run: would copy project files (excluding build/run/.gradle/...)'
+        return $DestRoot
+    }
+
+    if (Test-Path -LiteralPath $DestRoot) {
+        $existing = Get-ChildItem -LiteralPath $DestRoot -Force -ErrorAction SilentlyContinue
+        if ($existing) {
+            throw "Output folder already exists and is not empty: $DestRoot"
+        }
+    }
+    else {
+        New-Item -ItemType Directory -Path $DestRoot -Force | Out-Null
+    }
+
+    $fileCount = 0
+    $stack = [System.Collections.Generic.Stack[string]]::new()
+    $stack.Push($SourceRoot)
+
+    while ($stack.Count -gt 0) {
+        $current = $stack.Pop()
+        $relDir = if ($current.Length -le $SourceRoot.Length) { '' } else { $current.Substring($SourceRoot.Length).TrimStart('\', '/') }
+        $destDir = if ($relDir) { Join-Path $DestRoot $relDir } else { $DestRoot }
+        if (-not (Test-Path -LiteralPath $destDir)) {
+            New-Item -ItemType Directory -Path $destDir -Force | Out-Null
+        }
+
+        foreach ($item in Get-ChildItem -LiteralPath $current -Force -ErrorAction SilentlyContinue) {
+            if ($item.PSIsContainer) {
+                if ($excludeDirNames.Contains($item.Name)) { continue }
+                $stack.Push($item.FullName)
+            }
+            else {
+                $destFile = Join-Path $destDir $item.Name
+                Copy-Item -LiteralPath $item.FullName -Destination $destFile -Force
+                $fileCount++
+            }
+        }
+    }
+
+    Write-Ok "Copied $fileCount file(s) to output folder"
+    return $DestRoot
+}
+
 # -------------------- main --------------------
 
-$ProjectRoot = Resolve-ProjectRoot $Path
-if (-not (Test-Path (Join-Path $ProjectRoot 'src')) -and -not (Get-ChildItem $ProjectRoot -Filter '*.mcreator' -ErrorAction SilentlyContinue)) {
-    throw "Does not look like a mod project (no src/ or *.mcreator): $ProjectRoot"
+$SourceRoot = Resolve-ProjectRoot $Path
+if (-not (Test-Path (Join-Path $SourceRoot 'src')) -and -not (Get-ChildItem $SourceRoot -Filter '*.mcreator' -ErrorAction SilentlyContinue)) {
+    throw "Does not look like a mod project (no src/ or *.mcreator): $SourceRoot"
+}
+
+$WorkingOnCopy = $false
+if ($OutputPath) {
+    if (-not [System.IO.Path]::IsPathRooted($OutputPath)) {
+        $OutputPath = Join-Path (Get-Location) $OutputPath
+    }
+    $ProjectRoot = Copy-ProjectToOutput -SourceRoot $SourceRoot -DestRoot $OutputPath -DryRun:$DryRun
+    if ($DryRun) {
+        # Still validate / report as if we would convert the copy path
+        $ProjectRoot = [System.IO.Path]::GetFullPath($OutputPath)
+    }
+    else {
+        $ProjectRoot = Resolve-ProjectRoot $ProjectRoot
+    }
+    $WorkingOnCopy = $true
+    # Original is untouched; no need for in-tree backup zip
+    $SkipBackup = $true
+}
+else {
+    $ProjectRoot = $SourceRoot
 }
 
 if (-not $ModVersion) { $ModVersion = "$MinecraftVersion.0" }
@@ -543,10 +649,12 @@ $MinecraftVersionRange = "[$MinecraftVersion]"
 
 Write-Host ""
 Write-Host "NeoForge 26.2 Converter" -ForegroundColor White
-Write-Host "  Project : $ProjectRoot"
+Write-Host "  Source  : $SourceRoot"
+Write-Host "  Working : $ProjectRoot"
+if ($WorkingOnCopy) { Write-Host "  Mode    : copy-to-output (original preserved)" -ForegroundColor Green }
 Write-Host "  Target  : Minecraft $MinecraftVersion / NeoForge $NeoVersion"
 Write-Host "  Mod ver : $ModVersion"
-if ($DryRun) { Write-Host "  Mode    : DRY RUN (no writes)" -ForegroundColor Yellow }
+if ($DryRun) { Write-Host "  DryRun  : yes (no writes)" -ForegroundColor Yellow }
 
 if (-not $SkipBackup -and -not $DryRun) {
     New-ProjectBackup -ProjectRoot $ProjectRoot | Out-Null
@@ -716,6 +824,12 @@ if ($Compile -or $Build) {
     finally {
         Pop-Location
     }
+}
+
+if ($WorkingOnCopy -and -not $DryRun) {
+    Write-Host ""
+    Write-Host "Conversion wrote to: $ProjectRoot" -ForegroundColor Green
+    Write-Host "Original unchanged:  $SourceRoot" -ForegroundColor Green
 }
 
 if ($DryRun) {
