@@ -1,0 +1,6 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/RB.Mcreator.VersionUpdater.Setup/RB.Mcreator.VersionUpdater.Setup.csproj" />
+    <Project Path="src/RB.Mcreator.VersionUpdater/RB.Mcreator.VersionUpdater.csproj" />
+  </Folder>
+</Solution>

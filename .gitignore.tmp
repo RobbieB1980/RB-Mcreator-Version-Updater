@@ -1,6 +1,5 @@
-﻿# Local converter output
+# Local converter output
 .converter-backups/
-tests/fixture-*/
 *.zip
 
 # Build outputs (binaries published via GitHub Releases)

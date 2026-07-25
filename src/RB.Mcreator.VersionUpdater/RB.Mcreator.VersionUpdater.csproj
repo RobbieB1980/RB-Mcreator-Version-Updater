@@ -1,0 +1,31 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <UseWindowsForms>true</UseWindowsForms>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>RB-Mcreator-Version-Updater</AssemblyName>
+    <RootNamespace>RB.Mcreator.VersionUpdater</RootNamespace>
+    <ApplicationIcon></ApplicationIcon>
+    <Product>RB MCreator Version Updater</Product>
+    <Company>RobbieB1980</Company>
+    <Version>1.1.0</Version>
+    <FileVersion>1.1.0</FileVersion>
+    <InformationalVersion>1.1.0</InformationalVersion>
+    <Description>Convert MCreator / NeoForge 26.1.x workspaces to Minecraft 26.2</Description>
+  </PropertyGroup>
+
+  <!-- Ship PowerShell converter + templates next to the EXE -->
+  <ItemGroup>
+    <None Include="..\..\Convert-ToNeoForge262.ps1" Link="tools\Convert-ToNeoForge262.ps1" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\..\Convert-ToNeoForge262-GUI.ps1" Link="tools\Convert-ToNeoForge262-GUI.ps1" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\..\Launch-GUI.bat" Link="tools\Launch-GUI.bat" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\..\lib\**\*" Link="tools\lib\%(RecursiveDir)%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\..\templates\**\*" Link="tools\templates\%(RecursiveDir)%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\..\tests\Test-Transforms.ps1" Link="tools\tests\Test-Transforms.ps1" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\..\README.md" Link="tools\README.md" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+</Project>

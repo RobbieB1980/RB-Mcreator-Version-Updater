@@ -1,22 +1,34 @@
-﻿# RB MCreator Version Updater
+# RB MCreator Version Updater
 
 Convert **Minecraft 26.1.x NeoForge / MCreator Gradle workspaces** to **Minecraft 26.2 + NeoForge 26.2.x**.
 
 Built from a real large MCreator block mod migration (`robmod`: 26.1.2 → `neoforge-26.2.0.32-beta`).
 
-## Requirements
+## Download (Windows)
 
-- Windows PowerShell 5.1+ or PowerShell 7+
-- Network access only if you use **Fetch Gradle wrapper**
-- **JDK 25** to compile/run after conversion (Minecraft 26.2)
+Get the latest **Release** assets:
 
-## GUI (recommended)
+| Asset | Use when |
+|-------|----------|
+| **[RB-Mcreator-Version-Updater-Setup.exe](https://github.com/RobbieB1980/RB-Mcreator-Version-Updater/releases/latest)** | You want an installer (Start Menu / desktop shortcuts) |
+| **RB-Mcreator-Version-Updater-Portable.zip** | You want a fully portable folder (no install) |
 
-Double-click **`Launch-GUI.bat`**, or:
+### Installer
 
-```powershell
-.\Convert-ToNeoForge262-GUI.ps1
-```
+1. Download `RB-Mcreator-Version-Updater-Setup.exe`
+2. Run it (no admin required by default)
+3. Choose install folder (default: `%LOCALAPPDATA%\RB-Mcreator-Version-Updater`)
+4. Launch **RB MCreator Version Updater**
+
+The Setup EXE is **self-contained** and embeds the full portable toolset (GUI + PowerShell converter + templates).
+
+### Portable
+
+1. Download `RB-Mcreator-Version-Updater-Portable.zip`
+2. Extract anywhere
+3. Run `Start-Updater.bat` or `RB-Mcreator-Version-Updater.exe`
+
+## Using the app
 
 1. **Browse** for the input MCreator / NeoForge project folder  
 2. **Browse** (or accept the suggested) **output folder**  
@@ -26,124 +38,99 @@ Double-click **`Launch-GUI.bat`**, or:
 The tool **always copies to the output folder first**, then converts the copy.  
 **Your original project is never modified.**
 
-Optional checkboxes:
+Optional:
 
 - Fetch Gradle wrapper (recommended)
 - Compile after convert
 - Full build (jar)
 - Dry run (preview only)
 
-## CLI
+## Requirements
+
+- Windows x64
+- PowerShell 5.1+ (converter engine)
+- Network only if fetching the Gradle wrapper
+- **JDK 25** if you compile/run the converted Minecraft mod
+
+## CLI (PowerShell tools)
+
+Also included under `tools/` next to the EXE (and in this repo root):
 
 ```powershell
-git clone https://github.com/RobbieB1980/RB-Mcreator-Version-Updater.git
-cd RB-Mcreator-Version-Updater
-
 # Copy to a new folder, then convert (original untouched)
 .\Convert-ToNeoForge262.ps1 -Path "D:\mods\SomeMod" -OutputPath "D:\mods\SomeMod-26.2" -FetchWrapper
 
 # Preview only
 .\Convert-ToNeoForge262.ps1 -Path "D:\mods\SomeMod" -OutputPath "D:\mods\SomeMod-26.2" -DryRun
-
-# In-place convert (modifies Path) — use only if you intend to overwrite
-.\Convert-ToNeoForge262.ps1 -Path "D:\mods\SomeMod" -FetchWrapper -Compile
 ```
 
-## What it does
+Legacy PowerShell GUI:
+
+```powershell
+.\Convert-ToNeoForge262-GUI.ps1
+# or
+.\Launch-GUI.bat
+```
+
+## What conversion does
 
 | Step | Action |
 |------|--------|
-| Copy (with `-OutputPath` / GUI) | Copies project to output (skips `build/`, `run/`, `.gradle/`, …) |
-| `gradle.properties` | Sets `minecraft_version=26.2`, `neo_version=…`, heap, mod metadata |
+| Copy (with output path) | Copies project (skips `build/`, `run/`, `.gradle/`, …) |
+| `gradle.properties` | Sets `minecraft_version=26.2`, `neo_version=…` |
 | Gradle scaffold | Creates `build.gradle` / `settings.gradle` if missing (NeoGradle **7.1.38**, Java **25**) |
-| Existing `build.gradle` | Bumps NeoGradle plugin + Java toolchain to 25 when present |
-| Wrapper | Optional: pulls `gradlew` from [MDK-26.2-NeoGradle](https://github.com/NeoForgeMDKs/MDK-26.2-NeoGradle) |
-| `neoforge.mods.toml` | Updates NeoForge/Minecraft dependency ranges |
-| `pack.mcmeta` | Sets pack format **107** (26.2) |
-| `*.mcreator` | Updates generator / version / description when found |
-| Java sources | Applies known 26.1 → 26.2 API rewrites under `src/main/java` |
+| Wrapper | Optional: pulls `gradlew` from NeoForge MDK 26.2 |
+| `neoforge.mods.toml` / `pack.mcmeta` / `*.mcreator` | Version metadata updates |
+| Java sources | Known 26.1 → 26.2 API rewrites |
 
 ## Automatic Java rewrites
 
-| 26.1 pattern | 26.2 result |
-|--------------|-------------|
+| 26.1 | 26.2 |
+|------|------|
 | `emissiveRendering((bs, br, bp) -> true)` | `emissiveRendering(bs -> true)` |
 | `mc.setScreen(...)` | `mc.gui.setScreen(...)` |
 | `VertexFormat.Mode.QUADS` | `PrimitiveTopology.QUADS` |
 | `.getMainRenderTarget()` | `.gameRenderer.mainRenderTarget()` |
-| `createRenderPass(..., OptionalInt.empty(), ...)` | `Optional.empty()` |
-| `.drawIndexed(0, 0, 6, 1)` | `.drawIndexed(6, 1, 0, 0, 0)` |
-| `.drawIndexed(baseVertex, 0, 6, 1)` | `.drawIndexed(6, 1, 0, baseVertex, 0)` |
-| `.setVertexBuffer(0, sunBuffer)` | `.setVertexBuffer(0, sunBuffer.slice())` |
-| `writeTransform(modelViewStack, ...)` | `writeTransform(new Matrix4f(modelViewStack), ...)` |
+| `OptionalInt.empty()` in render passes | `Optional.empty()` |
+| 4-arg `drawIndexed` (sky helpers) | 5-arg form |
+| `setVertexBuffer(i, buf)` | `setVertexBuffer(i, buf.slice())` |
 
-## Parameters (CLI)
+## Build from source
 
-| Parameter | Default | Meaning |
-|-----------|---------|---------|
-| `-Path` | *(required)* | Input project root |
-| `-OutputPath` | *(empty)* | Copy here first; convert only the copy |
-| `-MinecraftVersion` | `26.2` | MC version |
-| `-NeoVersion` | `26.2.0.32-beta` | NeoForge version |
-| `-ModVersion` | `<MC>.0` | `mod_version` |
-| `-PackFormat` | `107` | `pack.mcmeta` min/max format |
-| `-DryRun` | off | No writes |
-| `-SkipBackup` | off | Skip zip backup (auto when using `-OutputPath`) |
-| `-SkipGradleScaffold` | off | Don't touch Gradle scripts |
-| `-SkipJavaTransforms` | off | Don't rewrite `.java` |
-| `-FetchWrapper` | off | Download MDK wrapper |
-| `-ForceTomlTemplate` | off | Overwrite mods.toml with template |
-| `-Compile` / `-Build` | off | Run Gradle after convert |
+```powershell
+git clone https://github.com/RobbieB1980/RB-Mcreator-Version-Updater.git
+cd RB-Mcreator-Version-Updater
+
+# Produces dist\ portable zip + Setup.exe
+.\scripts\Build-Release.ps1
+
+# Optional: publish GitHub Release assets
+.\scripts\Publish-GitHubRelease.ps1 -Tag v1.1.0
+```
+
+Requires: .NET 8+ SDK, Windows.
 
 ## Project layout
 
 ```
 RB-Mcreator-Version-Updater/
-  Launch-GUI.bat                 # double-click GUI
-  Convert-ToNeoForge262-GUI.ps1  # WinForms UI
-  Convert-ToNeoForge262.ps1      # CLI entry point
-  README.md
-  lib/
-    JavaApiTransforms.ps1
-  templates/
-    build.gradle.template
-    settings.gradle.template
-    neoforge.mods.toml.template
-  tests/
-    Test-Transforms.ps1
-```
-
-## After conversion
-
-```powershell
-cd D:\mods\SomeMod-26.2
-.\gradlew.bat compileJava
-.\gradlew.bat build
-.\gradlew.bat runClient
-```
-
-## Self-test transforms
-
-```powershell
-.\tests\Test-Transforms.ps1
+  Convert-ToNeoForge262.ps1          # CLI converter
+  Convert-ToNeoForge262-GUI.ps1      # PowerShell GUI
+  Launch-GUI.bat
+  lib/  templates/  tests/
+  src/
+    RB.Mcreator.VersionUpdater/      # WinForms GUI (EXE)
+    RB.Mcreator.VersionUpdater.Setup/ # Installer (EXE)
+  scripts/
+    Build-Release.ps1
+    Publish-GitHubRelease.ps1
 ```
 
 ## Limitations
 
-- Mixins, access transformers, and third-party mod APIs may still need manual fixes.
-- MCreator regenerate may still target 26.1.x and can overwrite converted files.
-- Unusual render/draw call shapes beyond the patterns above may need hand fixes.
+- Mixins / third-party APIs may need manual fixes.
+- MCreator regenerate may still target 26.1.x.
 - Heavy folders (`build/`, `run/`, `.gradle/`) are skipped when copying to output.
-
-## Extending transforms
-
-Edit `lib/JavaApiTransforms.ps1` → `Invoke-SingleFileTransforms`. Keep replacements **idempotent**.
-
-## Links
-
-- NeoForge versions: https://projects.neoforged.net/neoforged/neoforge  
-- MDK template: https://github.com/NeoForgeMDKs/MDK-26.2-NeoGradle  
-- Docs: https://docs.neoforged.net/
 
 ## License
 
