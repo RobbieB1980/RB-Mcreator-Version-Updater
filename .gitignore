@@ -1,0 +1,17 @@
+# Local converter output
+.converter-backups/
+tests/fixture-*/
+*.zip
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*~
+
+# Gradle noise if someone runs convert in-repo
+.gradle/
+build/
+run/
