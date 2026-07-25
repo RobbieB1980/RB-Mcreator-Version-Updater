@@ -20,3 +20,6 @@ Thumbs.db
 .gradle/
 build/
 run/
+
+*.csproj.user
+
