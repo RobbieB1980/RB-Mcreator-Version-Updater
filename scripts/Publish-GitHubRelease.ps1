@@ -18,8 +18,8 @@ $Dist = Join-Path $RepoRoot 'dist'
 
 $setup = Join-Path $Dist 'RB-Mcreator-Version-Updater-Setup.exe'
 $portable = Join-Path $Dist 'RB-Mcreator-Version-Updater-Portable.zip'
-if (-not (Test-Path $setup)) { throw "Missing $setup — run Build-Release.ps1 first" }
-if (-not (Test-Path $portable)) { throw "Missing $portable — run Build-Release.ps1 first" }
+if (-not (Test-Path $setup)) { throw "Missing $setup - run Build-Release.ps1 first" }
+if (-not (Test-Path $portable)) { throw "Missing $portable - run Build-Release.ps1 first" }
 
 # Resolve GitHub token from git credential helper
 $fill = "protocol=https`nhost=github.com`n`n" | git credential fill 2>$null
@@ -57,7 +57,7 @@ Convert MCreator / NeoForge **26.1.x** workspaces to **Minecraft 26.2**.
 | File | Description |
 |------|-------------|
 | ``RB-Mcreator-Version-Updater-Setup.exe`` | Windows installer (self-contained; embeds full portable toolset) |
-| ``RB-Mcreator-Version-Updater-Portable.zip`` | No install — extract and run ``Start-Updater.bat`` or the EXE |
+| ``RB-Mcreator-Version-Updater-Portable.zip`` | No install - extract and run ``Start-Updater.bat`` or the EXE |
 
 ### Requirements
 
