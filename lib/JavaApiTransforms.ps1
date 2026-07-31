@@ -6,14 +6,101 @@ function Get-JavaApiTransformNames {
         'setScreen-via-gui',
         'VertexFormat.Mode-to-PrimitiveTopology',
         'getMainRenderTarget',
+        'getMainCamera',
+        'minecraft-renderBuffers-via-gameRenderer',
         'createRenderPass-OptionalInt',
         'drawIndexed-4arg-to-5arg-base0',
         'drawIndexed-4arg-to-5arg-baseVertex',
         'setVertexBuffer-slice',
         'writeTransform-Matrix4f-copy',
         'getSequentialBuffer-PrimitiveTopology',
-        'BlockPos.getCenter-to-Vec3.atCenterOf'
+        'BlockPos.getCenter-to-Vec3.atCenterOf',
+        'EntityType-fields-to-EntityTypes',
+        'Items-ColorCollection',
+        'Blocks-ColorCollection'
     )
+}
+
+function Get-DyeColorAccessors {
+    # DyeColor name (SCREAMING) -> ColorCollection record accessor
+    return [ordered]@{
+        'WHITE'      = 'white'
+        'ORANGE'     = 'orange'
+        'MAGENTA'    = 'magenta'
+        'LIGHT_BLUE' = 'lightBlue'
+        'YELLOW'     = 'yellow'
+        'LIME'       = 'lime'
+        'PINK'       = 'pink'
+        'GRAY'       = 'gray'
+        'LIGHT_GRAY' = 'lightGray'
+        'CYAN'       = 'cyan'
+        'PURPLE'     = 'purple'
+        'BLUE'       = 'blue'
+        'BROWN'      = 'brown'
+        'GREEN'      = 'green'
+        'RED'        = 'red'
+        'BLACK'      = 'black'
+    }
+}
+
+function Get-ColorCollectionFieldMap {
+    <#
+    .SYNOPSIS
+      Build Items./Blocks.COLOR_SUFFIX => Collection.accessor() replacements for 26.2 ColorCollection.
+    #>
+    $colors = Get-DyeColorAccessors
+    # suffix on old field name -> (new collection field, prefix class)
+    $itemGroups = @(
+        @{ Suffix = 'WOOL';               Collection = 'WOOL' },
+        @{ Suffix = 'CARPET';             Collection = 'CARPET' },
+        @{ Suffix = 'BED';                Collection = 'BED' },
+        @{ Suffix = 'CONCRETE';           Collection = 'CONCRETE' },
+        @{ Suffix = 'CONCRETE_POWDER';    Collection = 'CONCRETE_POWDER' },
+        @{ Suffix = 'STAINED_GLASS';      Collection = 'STAINED_GLASS' },
+        @{ Suffix = 'STAINED_GLASS_PANE'; Collection = 'STAINED_GLASS_PANE' },
+        @{ Suffix = 'TERRACOTTA';         Collection = 'DYED_TERRACOTTA' },
+        @{ Suffix = 'GLAZED_TERRACOTTA';  Collection = 'GLAZED_TERRACOTTA' },
+        @{ Suffix = 'SHULKER_BOX';        Collection = 'DYED_SHULKER_BOX' },
+        @{ Suffix = 'CANDLE';             Collection = 'DYED_CANDLE' },
+        @{ Suffix = 'BANNER';             Collection = 'BANNER' },
+        @{ Suffix = 'DYE';                Collection = 'DYE' },
+        @{ Suffix = 'HARNESS';            Collection = 'HARNESS' },
+        @{ Suffix = 'BUNDLE';             Collection = 'DYED_BUNDLE' }
+    )
+    $blockGroups = @(
+        @{ Suffix = 'WOOL';               Collection = 'WOOL' },
+        @{ Suffix = 'CARPET';             Collection = 'CARPET' },
+        @{ Suffix = 'BED';                Collection = 'BED' },
+        @{ Suffix = 'CONCRETE';           Collection = 'CONCRETE' },
+        @{ Suffix = 'CONCRETE_POWDER';    Collection = 'CONCRETE_POWDER' },
+        @{ Suffix = 'STAINED_GLASS';      Collection = 'STAINED_GLASS' },
+        @{ Suffix = 'STAINED_GLASS_PANE'; Collection = 'STAINED_GLASS_PANE' },
+        @{ Suffix = 'TERRACOTTA';         Collection = 'DYED_TERRACOTTA' },
+        @{ Suffix = 'GLAZED_TERRACOTTA';  Collection = 'GLAZED_TERRACOTTA' },
+        @{ Suffix = 'SHULKER_BOX';        Collection = 'DYED_SHULKER_BOX' },
+        @{ Suffix = 'CANDLE';             Collection = 'DYED_CANDLE' },
+        @{ Suffix = 'BANNER';             Collection = 'BANNER' }
+    )
+
+    $map = [ordered]@{}
+    foreach ($g in $itemGroups) {
+        foreach ($c in $colors.Keys) {
+            $old = "Items.${c}_$($g.Suffix)"
+            $new = "Items.$($g.Collection).$($colors[$c])()"
+            $map[$old] = $new
+        }
+    }
+    foreach ($g in $blockGroups) {
+        foreach ($c in $colors.Keys) {
+            $old = "Blocks.${c}_$($g.Suffix)"
+            $new = "Blocks.$($g.Collection).$($colors[$c])()"
+            $map[$old] = $new
+        }
+    }
+    # Non-color renames that commonly trip 26.1 decompiles
+    $map['Blocks.CHAIN'] = 'Blocks.IRON_CHAIN'
+    $map['Items.CHAIN'] = 'Items.IRON_CHAIN'
+    return $map
 }
 
 function Add-JavaImport {
@@ -34,6 +121,29 @@ function Add-JavaImport {
     return $importLine + "`r`n" + $Source
 }
 
+function Find-JavaApiResidualWarnings {
+    <#
+    .SYNOPSIS
+      Patterns that still need manual 26.2 porting (feature rendering, etc.).
+    #>
+    param([string]$Text)
+
+    $warnings = New-Object System.Collections.Generic.List[string]
+    if ($Text -match '\bMultiBufferSource\b') {
+        $warnings.Add('MultiBufferSource removed in 26.2 — use SubmitNodeCollector / submitShapeOutline / SubmitCustomGeometryEvent') | Out-Null
+    }
+    if ($Text -match '\.bufferSource\s*\(') {
+        $warnings.Add('RenderBuffers.bufferSource() removed — world geometry must submit via SubmitNodeCollector') | Out-Null
+    }
+    if ($Text -match 'RenderLevelStageEvent' -and $Text -match '(getBuffer|VertexConsumer|bufferSource)') {
+        $warnings.Add('RenderLevelStageEvent + direct buffers: prefer SubmitCustomGeometryEvent for custom outlines') | Out-Null
+    }
+    if ($Text -match 'import\s+net\.minecraft\.client\.renderer\.MultiBufferSource') {
+        $warnings.Add('Stale MultiBufferSource import') | Out-Null
+    }
+    return @($warnings)
+}
+
 function Invoke-SingleFileTransforms {
     param([string]$Text)
 
@@ -42,6 +152,7 @@ function Invoke-SingleFileTransforms {
     $needsOptional = $false
     $needsMatrix4f = $false
     $needsVec3 = $false
+    $needsEntityTypes = $false
     $result = $Text
 
     # 1) emissiveRendering((bs, br, bp) ->  =>  emissiveRendering(bs ->
@@ -52,10 +163,8 @@ function Invoke-SingleFileTransforms {
     $next = [regex]::Replace($result, '(\w+)\.setScreen\(', {
         param($m)
         if ($m.Groups[1].Value -eq 'gui') { return $m.Value }
-        # avoid double-prefix: something.gui.setScreen already has setScreen after gui — handled above
         return $m.Groups[1].Value + '.gui.setScreen('
     })
-    # Fix accidental gui.gui.setScreen if re-run
     $next = $next -replace '(\w+)\.gui\.gui\.setScreen\(', '$1.gui.setScreen('
     if ($next -ne $result) { $hits.Add('setScreen-via-gui') | Out-Null; $result = $next }
 
@@ -68,9 +177,27 @@ function Invoke-SingleFileTransforms {
     }
 
     # 4) .getMainRenderTarget() => .gameRenderer.mainRenderTarget()
-    #    avoid double if already gameRenderer.mainRenderTarget
     $next = [regex]::Replace($result, '(?<!gameRenderer)\.getMainRenderTarget\(\)', '.gameRenderer.mainRenderTarget()')
     if ($next -ne $result) { $hits.Add('getMainRenderTarget') | Out-Null; $result = $next }
+
+    # 4b) .getMainCamera() => .mainCamera()  (GameRenderer field accessor rename)
+    $next = $result -replace '\.getMainCamera\(\)', '.mainCamera()'
+    if ($next -ne $result) { $hits.Add('getMainCamera') | Out-Null; $result = $next }
+
+    # 4c) Minecraft.getInstance().renderBuffers() => gameRenderer.renderBuffers()
+    #     RenderBuffers.bufferSource() is gone; residual scanner still warns on bufferSource().
+    $next = [regex]::Replace(
+        $result,
+        'Minecraft\.getInstance\(\)\.renderBuffers\(\)',
+        'Minecraft.getInstance().gameRenderer.renderBuffers()'
+    )
+    # Idempotent if already rewritten
+    $next = $next -replace 'Minecraft\.getInstance\(\)\.gameRenderer\.gameRenderer\.renderBuffers\(\)',
+        'Minecraft.getInstance().gameRenderer.renderBuffers()'
+    if ($next -ne $result) {
+        $hits.Add('minecraft-renderBuffers-via-gameRenderer') | Out-Null
+        $result = $next
+    }
 
     # 5) createRenderPass(..., OptionalInt.empty() => Optional.empty()
     $next = [regex]::Replace(
@@ -100,10 +227,8 @@ function Invoke-SingleFileTransforms {
     $next = [regex]::Replace($result, '\.setVertexBuffer\(\s*(\d+)\s*,\s*([a-zA-Z_]\w*)\s*\)', {
         param($m)
         $id = $m.Groups[2].Value
-        # Don't touch if someone passed a method call style we can't parse; bare id only
         return ".setVertexBuffer($($m.Groups[1].Value), $id.slice())"
     })
-    # Undo if we double-sliced: foo.slice().slice()
     $next = $next -replace '\.slice\(\)\.slice\(\)', '.slice()'
     if ($next -ne $result) { $hits.Add('setVertexBuffer-slice') | Out-Null; $result = $next }
 
@@ -113,7 +238,6 @@ function Invoke-SingleFileTransforms {
         'writeTransform\(\s*modelViewStack\s*,',
         'writeTransform(new Matrix4f(modelViewStack),'
     )
-    # idempotent
     $next = $next -replace 'writeTransform\(\s*new Matrix4f\(new Matrix4f\(modelViewStack\)\)\s*,', 'writeTransform(new Matrix4f(modelViewStack),'
     if ($next -ne $result) {
         $hits.Add('writeTransform-Matrix4f-copy') | Out-Null
@@ -121,7 +245,7 @@ function Invoke-SingleFileTransforms {
         $result = $next
     }
 
-    # 10) leftover getSequentialBuffer(VertexFormat.Mode.X) if Mode rename missed quotes
+    # 10) leftover getSequentialBuffer(VertexFormat.Mode.X)
     $next = [regex]::Replace(
         $result,
         'getSequentialBuffer\(\s*VertexFormat\.Mode\.(\w+)\s*\)',
@@ -134,19 +258,16 @@ function Invoke-SingleFileTransforms {
     }
 
     # 11) BlockPos.getCenter() removed in 26.2 => Vec3.atCenterOf(pos)
-    #     Also handle chained: pos.getCenter() in AABB.ofSize etc.
     $next = [regex]::Replace(
         $result,
         '(?<![\w.])([a-zA-Z_]\w*(?:\.\w+)*)\.getCenter\(\)',
         {
             param($m)
             $recv = $m.Groups[1].Value
-            # Skip if already Vec3.atCenterOf(...)
             if ($recv -match 'atCenterOf$') { return $m.Value }
             return "Vec3.atCenterOf($recv)"
         }
     )
-    # idempotent: Vec3.atCenterOf(Vec3.atCenterOf(x))
     $next = [regex]::Replace($next, 'Vec3\.atCenterOf\(\s*Vec3\.atCenterOf\(([^)]+)\)\s*\)', 'Vec3.atCenterOf($1)')
     if ($next -ne $result) {
         $hits.Add('BlockPos.getCenter-to-Vec3.atCenterOf') | Out-Null
@@ -154,8 +275,47 @@ function Invoke-SingleFileTransforms {
         $result = $next
     }
 
+    # 12) EntityType.VANILLA_FIELD => EntityTypes.VANILLA_FIELD (registry objects moved in 26.2)
+    #     Only SCREAMING_SNAKE constants; leaves EntityType.Builder / generics alone.
+    $next = [regex]::Replace(
+        $result,
+        '\bEntityType\.([A-Z][A-Z0-9_]*)\b',
+        {
+            param($m)
+            $field = $m.Groups[1].Value
+            # Skip nested type names that are not registry entries (none currently SCREAMING on EntityType besides constants)
+            return "EntityTypes.$field"
+        }
+    )
+    if ($next -ne $result) {
+        $hits.Add('EntityType-fields-to-EntityTypes') | Out-Null
+        $needsEntityTypes = $true
+        $result = $next
+    }
+
+    # 13) Items/Blocks color fields => ColorCollection accessors
+    $colorMap = Get-ColorCollectionFieldMap
+    $colorHit = $false
+    $blockColorHit = $false
+    foreach ($old in $colorMap.Keys) {
+        if ($result.Contains($old)) {
+            $result = $result.Replace($old, $colorMap[$old])
+            if ($old.StartsWith('Items.')) { $colorHit = $true }
+            if ($old.StartsWith('Blocks.')) { $blockColorHit = $true }
+        }
+    }
+    if ($colorHit) { $hits.Add('Items-ColorCollection') | Out-Null }
+    if ($blockColorHit) { $hits.Add('Blocks-ColorCollection') | Out-Null }
+
+    $warnings = Find-JavaApiResidualWarnings -Text $result
+
     if ($hits.Count -eq 0) {
-        return [pscustomobject]@{ Text = $Text; Hits = @(); Changed = $false }
+        return [pscustomobject]@{
+            Text     = $Text
+            Hits     = @()
+            Warnings = $warnings
+            Changed  = $false
+        }
     }
 
     if ($needsPrimitiveTopology -and $result -notmatch 'import com\.mojang\.blaze3d\.PrimitiveTopology;') {
@@ -170,14 +330,21 @@ function Invoke-SingleFileTransforms {
     if ($needsVec3 -and $result -notmatch 'import net\.minecraft\.world\.phys\.Vec3;') {
         $result = Add-JavaImport -Source $result -Import 'net.minecraft.world.phys.Vec3'
     }
+    if ($needsEntityTypes -and $result -notmatch 'import net\.minecraft\.world\.entity\.EntityTypes;') {
+        $result = Add-JavaImport -Source $result -Import 'net.minecraft.world.entity.EntityTypes'
+    }
     if ($result -match 'import java\.util\.OptionalInt;' -and $result -notmatch 'OptionalInt\.') {
         $result = $result -replace "(?m)^import java\.util\.OptionalInt;\r?\n", ''
     }
 
+    # Re-scan residuals after rewrites
+    $warnings = Find-JavaApiResidualWarnings -Text $result
+
     return [pscustomobject]@{
-        Text    = $result
-        Hits    = @($hits)
-        Changed = ($result -ne $Text)
+        Text     = $result
+        Hits     = @($hits)
+        Warnings = $warnings
+        Changed  = ($result -ne $Text)
     }
 }
 
@@ -192,14 +359,26 @@ function Invoke-JavaApiTransforms {
         Where-Object { $_.FullName -notmatch '\\build\\|\\run\\|\\\.gradle\\|\\\.converter-backups\\' }
 
     $report = New-Object System.Collections.Generic.List[object]
+    $warningReport = New-Object System.Collections.Generic.List[object]
     $filesTouched = 0
 
     foreach ($file in $files) {
         $original = [System.IO.File]::ReadAllText($file.FullName)
         $applied = Invoke-SingleFileTransforms -Text $original
+        $rel = $file.FullName.Substring($Root.Length).TrimStart('\', '/')
+
+        if ($applied.Warnings -and $applied.Warnings.Count -gt 0) {
+            $warningReport.Add([pscustomobject]@{
+                File     = $rel
+                Warnings = ($applied.Warnings -join ' | ')
+            }) | Out-Null
+            if ($VerboseLog) {
+                Write-Host "  WARN  $rel  [$($applied.Warnings -join '; ')]" -ForegroundColor Yellow
+            }
+        }
+
         if (-not $applied.Changed) { continue }
 
-        $rel = $file.FullName.Substring($Root.Length).TrimStart('\', '/')
         $report.Add([pscustomobject]@{
             File       = $rel
             Transforms = ($applied.Hits -join ', ')
@@ -216,7 +395,8 @@ function Invoke-JavaApiTransforms {
     }
 
     return [pscustomobject]@{
-        FilesTouched = $filesTouched
-        Report       = $report
+        FilesTouched  = $filesTouched
+        Report        = $report
+        WarningReport = $warningReport
     }
 }

@@ -150,6 +150,29 @@ function Read-GradleProperties([string]$File) {
     return $map
 }
 
+function Ensure-ModPropertyDefaults {
+    <#
+    .SYNOPSIS
+      Ensure NeoGradle MDK processResources expand keys always exist.
+      Missing mod_license/mod_credits/mod_display_url causes:
+      "Could not get unknown property 'mod_license' for task ':processResources'".
+    #>
+    param([hashtable]$Props)
+
+    if (-not $Props['mod_id']) { $Props['mod_id'] = 'examplemod' }
+    if (-not $Props['mod_name']) { $Props['mod_name'] = $Props['mod_id'] }
+    if (-not $Props.ContainsKey('mod_license') -or [string]::IsNullOrWhiteSpace([string]$Props['mod_license'])) {
+        $Props['mod_license'] = 'All Rights Reserved'
+    }
+    if (-not $Props['mod_group_id']) { $Props['mod_group_id'] = "net.mcreator.$($Props['mod_id'])" }
+    if (-not $Props['mod_authors']) { $Props['mod_authors'] = 'Unknown' }
+    if (-not $Props['mod_description']) { $Props['mod_description'] = "$($Props['mod_name']) for Minecraft $MinecraftVersion" }
+    # Empty string is valid for optional MDK expand tokens — key must still exist
+    if (-not $Props.ContainsKey('mod_credits')) { $Props['mod_credits'] = '' }
+    if (-not $Props.ContainsKey('mod_display_url')) { $Props['mod_display_url'] = '' }
+    return $Props
+}
+
 function Write-GradlePropertiesFile {
     param(
         [string]$File,
@@ -179,6 +202,7 @@ function Write-GradlePropertiesFile {
     $Props['minecraft_version_range'] = $MinecraftVersionRange
     $Props['neo_version'] = $NeoVersion
     $Props['mod_version'] = $ModVersion
+    $Props = Ensure-ModPropertyDefaults -Props $Props
 
     $sb = New-Object System.Text.StringBuilder
     [void]$sb.AppendLine('# Generated/updated by neoforge-26.2-converter')
@@ -195,10 +219,9 @@ function Write-GradlePropertiesFile {
     }
     [void]$sb.AppendLine('')
     [void]$sb.AppendLine('## Mod Properties')
+    # Always emit full MDK expand set (build.gradle processResources requires these keys)
     foreach ($k in @('mod_id', 'mod_name', 'mod_license', 'mod_version', 'mod_group_id', 'mod_authors', 'mod_description', 'mod_credits', 'mod_display_url')) {
-        if ($Props.ContainsKey($k)) {
-            [void]$sb.AppendLine("$k=$($Props[$k])")
-        }
+        [void]$sb.AppendLine("$k=$($Props[$k])")
     }
 
     # Preserve any extra keys
@@ -605,16 +628,23 @@ function New-ProjectBackup {
 function Infer-ModMetadata {
     param([string]$ProjectRoot, [hashtable]$Props)
 
-    # From existing gradle.properties
-    if ($Props['mod_id']) { return $Props }
+    # IMPORTANT: Do NOT early-return when mod_id is already set.
+    # Decompiled / partial projects often have mod_id but lack mod_license and other
+    # MDK expand keys required by processResources (BuildPaste-style failures).
 
-    # From neoforge.mods.toml
-    $toml = Join-Path $ProjectRoot 'src\main\resources\META-INF\neoforge.mods.toml'
-    if (Test-Path $toml) {
+    # From neoforge.mods.toml — fill any missing keys even when gradle.properties has mod_id
+    $tomlCandidates = @(
+        (Join-Path $ProjectRoot 'src\main\resources\META-INF\neoforge.mods.toml'),
+        (Join-Path $ProjectRoot 'src\main\templates\META-INF\neoforge.mods.toml')
+    )
+    foreach ($toml in $tomlCandidates) {
+        if (-not (Test-Path $toml)) { continue }
         $t = Get-Content $toml -Raw
         if (-not $Props['mod_id'] -and $t -match 'modId\s*=\s*"([^"]+)"') { $Props['mod_id'] = $Matches[1] }
         if (-not $Props['mod_name'] -and $t -match 'displayName\s*=\s*"([^"]+)"') { $Props['mod_name'] = $Matches[1] }
-        if (-not $Props['mod_license'] -and $t -match 'license\s*=\s*"([^"]+)"') { $Props['mod_license'] = $Matches[1] }
+        if ((-not $Props['mod_license'] -or [string]::IsNullOrWhiteSpace([string]$Props['mod_license'])) -and $t -match 'license\s*=\s*"([^"]+)"') {
+            $Props['mod_license'] = $Matches[1]
+        }
         if (-not $Props['mod_authors'] -and $t -match 'authors\s*=\s*"([^"]+)"') { $Props['mod_authors'] = $Matches[1] }
         if (-not $Props['mod_description'] -and $t -match '(?m)^\s*description\s*=\s*"([^"]+)"') {
             $Props['mod_description'] = $Matches[1].Trim()
@@ -622,8 +652,12 @@ function Infer-ModMetadata {
         elseif (-not $Props['mod_description'] -and $t -match "(?s)description\s*=\s*'''\s*(.*?)\s*'''") {
             $Props['mod_description'] = ($Matches[1] -replace '\s+', ' ').Trim()
         }
-        if (-not $Props['mod_credits'] -and $t -match 'credits\s*=\s*"([^"]+)"') { $Props['mod_credits'] = $Matches[1] }
-        if (-not $Props['mod_display_url'] -and $t -match 'displayURL\s*=\s*"([^"]+)"') { $Props['mod_display_url'] = $Matches[1] }
+        if ((-not $Props.ContainsKey('mod_credits') -or [string]::IsNullOrWhiteSpace([string]$Props['mod_credits'])) -and $t -match 'credits\s*=\s*"([^"]+)"') {
+            $Props['mod_credits'] = $Matches[1]
+        }
+        if ((-not $Props.ContainsKey('mod_display_url') -or [string]::IsNullOrWhiteSpace([string]$Props['mod_display_url'])) -and $t -match 'displayURL\s*=\s*"([^"]+)"') {
+            $Props['mod_display_url'] = $Matches[1]
+        }
     }
 
     # From main @Mod class package
@@ -636,27 +670,19 @@ function Infer-ModMetadata {
             $pkgLine = Select-String -Path $modClass.Path -Pattern '^package\s+([\w\.]+);' | Select-Object -First 1
             if ($pkgLine) {
                 $pkg = $pkgLine.Matches[0].Groups[1].Value
-                # group is package without last segment if last is mod id-ish
                 $Props['mod_group_id'] = $pkg
             }
         }
     }
 
-    # Folder name fallback
+    # Folder name fallback + always ensure MDK keys
     $folder = Split-Path $ProjectRoot -Leaf
     if (-not $Props['mod_id']) {
         $Props['mod_id'] = ($folder -replace '[^a-z0-9_]', '').ToLower()
         if ($Props['mod_id'].Length -lt 2) { $Props['mod_id'] = 'examplemod' }
     }
-    if (-not $Props['mod_name']) { $Props['mod_name'] = $Props['mod_id'] }
-    if (-not $Props['mod_license']) { $Props['mod_license'] = 'All Rights Reserved' }
-    if (-not $Props['mod_group_id']) { $Props['mod_group_id'] = "net.mcreator.$($Props['mod_id'])" }
-    if (-not $Props['mod_authors']) { $Props['mod_authors'] = 'Unknown' }
-    if (-not $Props['mod_description']) { $Props['mod_description'] = "$($Props['mod_name']) for Minecraft $MinecraftVersion" }
-    if (-not $Props['mod_credits']) { $Props['mod_credits'] = '' }
-    if (-not $Props['mod_display_url']) { $Props['mod_display_url'] = '' }
 
-    return $Props
+    return (Ensure-ModPropertyDefaults -Props $Props)
 }
 
 function Update-ExistingBuildGradle {
@@ -998,6 +1024,16 @@ if (-not $SkipJavaTransforms) {
         elseif ($result.Report.Count -gt 40) {
             Write-Info "($($result.Report.Count) files changed; listing suppressed)"
         }
+        if ($result.WarningReport -and $result.WarningReport.Count -gt 0) {
+            Write-Warn2 "Manual follow-up likely in $($result.WarningReport.Count) file(s) (feature rendering / MultiBufferSource):"
+            $show = $result.WarningReport | Select-Object -First 15
+            foreach ($w in $show) {
+                Write-Warn2 "  $($w.File): $($w.Warnings)"
+            }
+            if ($result.WarningReport.Count -gt 15) {
+                Write-Warn2 "  ... and $($result.WarningReport.Count - 15) more"
+            }
+        }
     }
     else {
         Write-Warn2 'No src/main/java - skipped Java transforms'
@@ -1042,13 +1078,22 @@ Known automatic Java transforms:
   - mc.setScreen(...)                   =>  mc.gui.setScreen(...)
   - VertexFormat.Mode.*                 =>  PrimitiveTopology.*
   - getMainRenderTarget()               =>  gameRenderer.mainRenderTarget()
+  - getMainCamera()                     =>  mainCamera()
+  - Minecraft.getInstance().renderBuffers() => gameRenderer.renderBuffers()
   - createRenderPass(... OptionalInt)   =>  Optional.empty()
   - drawIndexed 4-arg (MCreator sky)    =>  5-arg form
   - setVertexBuffer(i, buf)             =>  setVertexBuffer(i, buf.slice())
   - writeTransform(modelViewStack,      =>  writeTransform(new Matrix4f(modelViewStack),
   - pos.getCenter()                     =>  Vec3.atCenterOf(pos)
+  - EntityType.VANILLA_FIELD            =>  EntityTypes.VANILLA_FIELD
+  - Items/Blocks COLOR_* (wool, etc.)   =>  ColorCollection accessors (.white(), ...)
+
+Still manual (warned when detected):
+  - MultiBufferSource / bufferSource() world drawing
+  - Custom outlines: SubmitCustomGeometryEvent + submitShapeOutline
 
 Also auto-scaffolds missing assets/<ns>/items/*.json client item defs (MC 26.x).
+Always writes mod_license / mod_credits / mod_display_url for NeoGradle processResources.
 
 Supports: MCreator workspaces, NeoGradle MDK, ModDevGradle hand ports.
 
