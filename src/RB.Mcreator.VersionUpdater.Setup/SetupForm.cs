@@ -1,17 +1,27 @@
 using System.Diagnostics;
 using System.IO.Compression;
 using System.Reflection;
+using System.Text;
 using Microsoft.Win32;
 
 namespace RB.Mcreator.VersionUpdater.Setup;
 
 public sealed class SetupForm : Form
 {
+    private const string AppDisplayName = "RB All Updater";
+    private const string ExeName = "RB-All-Updater.exe";
+    private const string LegacyExeName = "RB-Mcreator-Version-Updater.exe";
+    private const string UninstallRegKey = @"Software\Microsoft\Windows\CurrentVersion\Uninstall\RB-All-Updater";
+    private const string AppPathsKey = @"Software\Microsoft\Windows\CurrentVersion\App Paths\RB-All-Updater.exe";
+    private const string DesktopLnk = "RB All Updater.lnk";
+    private const string StartMenuFolder = "RB All Updater";
+
     private readonly TextBox _txtDir = new();
     private readonly CheckBox _chkDesktop = new() { Text = "Create desktop shortcut", Checked = true, AutoSize = true };
     private readonly CheckBox _chkStartMenu = new() { Text = "Create Start Menu shortcut", Checked = true, AutoSize = true };
     private readonly ProgressBar _progress = new() { Style = ProgressBarStyle.Continuous, Minimum = 0, Maximum = 100 };
     private readonly Button _btnInstall = new() { Text = "Install", Height = 32, Width = 120 };
+    private readonly Button _btnUninstall = new() { Text = "Uninstall", Height = 32, Width = 120 };
     private readonly Button _btnBrowse = new() { Text = "Browse...", Height = 28, Width = 100 };
     private readonly Button _btnCancel = new() { Text = "Close", Height = 32, Width = 100 };
     private readonly Label _status = new() { AutoSize = false, Height = 40 };
@@ -19,14 +29,14 @@ public sealed class SetupForm : Form
 
     public SetupForm()
     {
-        Text = "Install RB All Updater";
-        // ClientSize (not outer Size) so DPI/title-bar never clips the bottom buttons
-        ClientSize = new Size(580, 380);
-        MinimumSize = new Size(560, 360);
+        Text = "Install " + AppDisplayName;
+        ClientSize = new Size(600, 400);
+        MinimumSize = new Size(580, 380);
         FormBorderStyle = FormBorderStyle.FixedDialog;
         MaximizeBox = false;
         MinimizeBox = false;
         StartPosition = FormStartPosition.CenterScreen;
+        try { Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath); } catch { /* optional */ }
         BackColor = Color.FromArgb(32, 34, 40);
         ForeColor = Color.Gainsboro;
         Font = new Font("Segoe UI", 9.5f);
@@ -35,7 +45,7 @@ public sealed class SetupForm : Form
 
         var title = new Label
         {
-            Text = "RB All Updater",
+            Text = AppDisplayName,
             Font = new Font("Segoe UI Semibold", 14f),
             ForeColor = Color.White,
             Location = new Point(24, 18),
@@ -43,15 +53,15 @@ public sealed class SetupForm : Form
         };
         var sub = new Label
         {
-            Text = "Installs a portable toolset for MCreator, ModDevGradle, and NeoGradle 26.1 → 26.2.",
+            Text = "Installs a portable toolset for MCreator, ModDevGradle, and NeoGradle 26.1 → 26.2.\nUninstall is available here, from Start Menu, or Apps & features.",
             ForeColor = Color.FromArgb(160, 200, 160),
             Location = new Point(24, 52),
-            Size = new Size(530, 36)
+            Size = new Size(550, 40)
         };
 
-        var lbl = new Label { Text = "Install folder:", Location = new Point(24, 100), AutoSize = true };
-        _txtDir.Location = new Point(24, 126);
-        _txtDir.Width = 420;
+        var lbl = new Label { Text = "Install folder:", Location = new Point(24, 104), AutoSize = true };
+        _txtDir.Location = new Point(24, 130);
+        _txtDir.Width = 440;
         _txtDir.Height = 26;
         _txtDir.BackColor = Color.FromArgb(45, 48, 56);
         _txtDir.ForeColor = Color.White;
@@ -60,41 +70,31 @@ public sealed class SetupForm : Form
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
             "RB-All-Updater");
 
-        _btnBrowse.Location = new Point(454, 124);
+        _btnBrowse.Location = new Point(474, 128);
         _btnBrowse.FlatStyle = FlatStyle.Flat;
         _btnBrowse.BackColor = Color.FromArgb(60, 64, 78);
         _btnBrowse.ForeColor = Color.White;
 
-        _chkDesktop.Location = new Point(24, 170);
+        _chkDesktop.Location = new Point(24, 174);
         _chkDesktop.ForeColor = Color.Gainsboro;
-        _chkStartMenu.Location = new Point(24, 200);
+        _chkStartMenu.Location = new Point(24, 204);
         _chkStartMenu.ForeColor = Color.Gainsboro;
 
-        _progress.Location = new Point(24, 242);
-        _progress.Size = new Size(532, 22);
+        _progress.Location = new Point(24, 246);
+        _progress.Size = new Size(552, 22);
 
-        // Status left; Install + Close fully visible on the right with room below
-        _status.Location = new Point(24, 282);
-        _status.Size = new Size(300, 48);
+        _status.Location = new Point(24, 286);
+        _status.Size = new Size(220, 48);
         _status.ForeColor = Color.Gainsboro;
 
-        _btnInstall.Location = new Point(320, 288);
-        _btnInstall.Size = new Size(120, 36);
-        _btnInstall.FlatStyle = FlatStyle.Flat;
-        _btnInstall.BackColor = Color.FromArgb(46, 120, 80);
-        _btnInstall.ForeColor = Color.White;
-        _btnInstall.FlatAppearance.BorderColor = Color.FromArgb(70, 160, 100);
-
-        _btnCancel.Location = new Point(452, 288);
-        _btnCancel.Size = new Size(104, 36);
-        _btnCancel.FlatStyle = FlatStyle.Flat;
-        _btnCancel.BackColor = Color.FromArgb(60, 64, 78);
-        _btnCancel.ForeColor = Color.White;
+        StylePrimary(_btnInstall, new Point(250, 292));
+        StyleDanger(_btnUninstall, new Point(378, 292));
+        StyleSecondary(_btnCancel, new Point(496, 292));
 
         Controls.AddRange(new Control[]
         {
             title, sub, lbl, _txtDir, _btnBrowse, _chkDesktop, _chkStartMenu,
-            _progress, _status, _btnInstall, _btnCancel
+            _progress, _status, _btnInstall, _btnUninstall, _btnCancel
         });
 
         _btnBrowse.Click += (_, _) =>
@@ -113,6 +113,36 @@ public sealed class SetupForm : Form
 
         _btnCancel.Click += (_, _) => Close();
         _btnInstall.Click += async (_, _) => await InstallAsync();
+        _btnUninstall.Click += async (_, _) => await UninstallAsync();
+    }
+
+    private static void StylePrimary(Button b, Point loc)
+    {
+        b.Location = loc;
+        b.Size = new Size(120, 36);
+        b.FlatStyle = FlatStyle.Flat;
+        b.BackColor = Color.FromArgb(46, 120, 80);
+        b.ForeColor = Color.White;
+        b.FlatAppearance.BorderColor = Color.FromArgb(70, 160, 100);
+    }
+
+    private static void StyleDanger(Button b, Point loc)
+    {
+        b.Location = loc;
+        b.Size = new Size(110, 36);
+        b.FlatStyle = FlatStyle.Flat;
+        b.BackColor = Color.FromArgb(120, 50, 50);
+        b.ForeColor = Color.White;
+        b.FlatAppearance.BorderColor = Color.FromArgb(160, 80, 80);
+    }
+
+    private static void StyleSecondary(Button b, Point loc)
+    {
+        b.Location = loc;
+        b.Size = new Size(80, 36);
+        b.FlatStyle = FlatStyle.Flat;
+        b.BackColor = Color.FromArgb(60, 64, 78);
+        b.ForeColor = Color.White;
     }
 
     private async Task InstallAsync()
@@ -125,10 +155,7 @@ public sealed class SetupForm : Form
             return;
         }
 
-        try
-        {
-            dest = Path.GetFullPath(dest);
-        }
+        try { dest = Path.GetFullPath(dest); }
         catch (Exception ex)
         {
             MessageBox.Show(this, "Invalid folder: " + ex.Message, "Setup", MessageBoxButtons.OK, MessageBoxIcon.Error);
@@ -136,9 +163,7 @@ public sealed class SetupForm : Form
         }
 
         _busy = true;
-        _btnInstall.Enabled = false;
-        _btnBrowse.Enabled = false;
-        _txtDir.Enabled = false;
+        SetUiEnabled(false);
         _status.Text = "Installing...";
         _progress.Value = 5;
 
@@ -149,16 +174,13 @@ public sealed class SetupForm : Form
             _status.Text = "Installation complete.";
             _status.ForeColor = Color.LightGreen;
 
-            var exe = Path.Combine(dest, "RB-All-Updater.exe");
-            if (!File.Exists(exe))
-                exe = Path.Combine(dest, "RB-Mcreator-Version-Updater.exe"); // legacy package name
+            var exe = ResolveExe(dest);
             var r = MessageBox.Show(this,
-                "Installed successfully to:\n" + dest + "\n\nLaunch RB All Updater now?",
+                "Installed successfully to:\n" + dest +
+                "\n\nUninstall via:\n• This setup's Uninstall button\n• Start Menu → " + AppDisplayName + " → Uninstall\n• Windows Apps & features\n\nLaunch " + AppDisplayName + " now?",
                 "Setup complete", MessageBoxButtons.YesNo, MessageBoxIcon.Information);
             if (r == DialogResult.Yes && File.Exists(exe))
-            {
                 Process.Start(new ProcessStartInfo(exe) { UseShellExecute = true, WorkingDirectory = dest });
-            }
         }
         catch (Exception ex)
         {
@@ -169,10 +191,63 @@ public sealed class SetupForm : Form
         finally
         {
             _busy = false;
-            _btnInstall.Enabled = true;
-            _btnBrowse.Enabled = true;
-            _txtDir.Enabled = true;
+            SetUiEnabled(true);
         }
+    }
+
+    private async Task UninstallAsync()
+    {
+        if (_busy) return;
+        var dest = _txtDir.Text.Trim();
+        try { dest = Path.GetFullPath(dest); } catch { /* use as-is */ }
+
+        if (!Directory.Exists(dest) && !IsRegisteredInstall(out dest))
+        {
+            MessageBox.Show(this,
+                "No install found at that folder, and no registered " + AppDisplayName + " install was found.",
+                "Uninstall", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            return;
+        }
+
+        var confirm = MessageBox.Show(this,
+            "Uninstall " + AppDisplayName + " from:\n" + dest +
+            "\n\nThis removes the app, shortcuts, and Apps & features entry.",
+            "Confirm uninstall", MessageBoxButtons.YesNo, MessageBoxIcon.Question);
+        if (confirm != DialogResult.Yes) return;
+
+        _busy = true;
+        SetUiEnabled(false);
+        _status.Text = "Uninstalling...";
+        _progress.Value = 10;
+
+        try
+        {
+            await Task.Run(() => UninstallCore(dest));
+            _progress.Value = 100;
+            _status.Text = "Uninstalled.";
+            _status.ForeColor = Color.LightGreen;
+            MessageBox.Show(this, AppDisplayName + " has been uninstalled.", "Uninstall complete",
+                MessageBoxButtons.OK, MessageBoxIcon.Information);
+        }
+        catch (Exception ex)
+        {
+            _status.Text = "Uninstall failed.";
+            _status.ForeColor = Color.Salmon;
+            MessageBox.Show(this, ex.Message, "Uninstall failed", MessageBoxButtons.OK, MessageBoxIcon.Error);
+        }
+        finally
+        {
+            _busy = false;
+            SetUiEnabled(true);
+        }
+    }
+
+    private void SetUiEnabled(bool enabled)
+    {
+        _btnInstall.Enabled = enabled;
+        _btnUninstall.Enabled = enabled;
+        _btnBrowse.Enabled = enabled;
+        _txtDir.Enabled = enabled;
     }
 
     private void InstallCore(string dest)
@@ -186,49 +261,214 @@ public sealed class SetupForm : Form
                 "Could not find portable package.\n\nPlace 'portable-payload.zip' next to this installer,\nor run Build-Release.ps1 to produce the full distribution.");
 
         Report(20, "Extracting tools...");
-        // Clear previous install files carefully (only our known names if folder was used before)
-        ExtractZip(payloadZip, dest, progress => Report(20 + (int)(progress * 60), "Extracting..."));
+        ExtractZip(payloadZip, dest, progress => Report(20 + (int)(progress * 50), "Extracting..."));
 
-        var exe = Path.Combine(dest, "RB-All-Updater.exe");
+        var exe = ResolveExe(dest);
         if (!File.Exists(exe))
-            exe = Path.Combine(dest, "RB-Mcreator-Version-Updater.exe");
-        if (!File.Exists(exe))
-            throw new InvalidOperationException("Package extracted but RB-All-Updater.exe is missing.");
+            throw new InvalidOperationException("Package extracted but " + ExeName + " is missing.");
+
+        // Ensure app.ico next to exe for shortcuts (if payload didn't include it)
+        var iconPath = Path.Combine(dest, "app.ico");
+        TryExtractEmbeddedIcon(iconPath);
+
+        Report(75, "Writing uninstaller...");
+        WriteUninstaller(dest, exe);
 
         Report(85, "Creating shortcuts...");
         if (_chkDesktop.Checked)
-            CreateShortcut(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory),
-                "RB All Updater.lnk"), exe, dest);
+            CreateShortcut(
+                Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory), DesktopLnk),
+                exe, dest, null, exe);
+
+        var sm = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.StartMenu), "Programs", StartMenuFolder);
         if (_chkStartMenu.Checked)
         {
-            var sm = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.StartMenu), "Programs",
-                "RB All Updater");
             Directory.CreateDirectory(sm);
-            CreateShortcut(Path.Combine(sm, "RB All Updater.lnk"), exe, dest);
-            CreateShortcut(Path.Combine(sm, "Uninstall (delete folder).lnk"), "explorer.exe", dest, dest);
+            CreateShortcut(Path.Combine(sm, AppDisplayName + ".lnk"), exe, dest, null, exe);
+            CreateShortcut(Path.Combine(sm, "Uninstall " + AppDisplayName + ".lnk"),
+                Path.Combine(dest, "Uninstall.cmd"), dest, null, exe);
         }
 
-        Report(92, "Writing uninstaller helper...");
-        File.WriteAllText(Path.Combine(dest, "UNINSTALL.txt"),
-            "To uninstall RB All Updater:\r\n" +
-            "1. Close the application if it is running.\r\n" +
-            "2. Delete this folder:\r\n   " + dest + "\r\n" +
-            "3. Remove desktop / Start Menu shortcuts if present.\r\n");
+        Report(92, "Registering Apps & features...");
+        RegisterUninstall(dest, exe);
 
-        // Optional registry App Paths (HKCU - no admin)
         try
         {
-            using var key = Registry.CurrentUser.CreateSubKey(
-                @"Software\Microsoft\Windows\CurrentVersion\App Paths\RB-All-Updater.exe");
+            using var key = Registry.CurrentUser.CreateSubKey(AppPathsKey);
             key?.SetValue("", exe);
             key?.SetValue("Path", dest);
         }
-        catch
-        {
-            // non-fatal
-        }
+        catch { /* non-fatal */ }
+
+        File.WriteAllText(Path.Combine(dest, "UNINSTALL.txt"),
+            "Uninstall " + AppDisplayName + ":\r\n" +
+            "• Run Uninstall.cmd in this folder\r\n" +
+            "• Or Start Menu → " + AppDisplayName + " → Uninstall\r\n" +
+            "• Or Windows Settings → Apps → " + AppDisplayName + "\r\n" +
+            "• Or open the Setup and click Uninstall\r\n");
 
         Report(100, "Done.");
+    }
+
+    private void UninstallCore(string dest)
+    {
+        Report(20, "Stopping app if running...");
+        try
+        {
+            foreach (var p in Process.GetProcessesByName(Path.GetFileNameWithoutExtension(ExeName)))
+            {
+                try { p.Kill(entireProcessTree: true); } catch { /* ignore */ }
+            }
+            foreach (var p in Process.GetProcessesByName(Path.GetFileNameWithoutExtension(LegacyExeName)))
+            {
+                try { p.Kill(entireProcessTree: true); } catch { /* ignore */ }
+            }
+        }
+        catch { /* ignore */ }
+
+        Report(40, "Removing shortcuts...");
+        TryDelete(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory), DesktopLnk));
+        var sm = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.StartMenu), "Programs", StartMenuFolder);
+        TryDeleteDir(sm);
+
+        Report(60, "Removing registry entries...");
+        try { Registry.CurrentUser.DeleteSubKeyTree(UninstallRegKey, throwOnMissingSubKey: false); } catch { /* ignore */ }
+        try { Registry.CurrentUser.DeleteSubKeyTree(AppPathsKey, throwOnMissingSubKey: false); } catch { /* ignore */ }
+
+        Report(80, "Removing install folder...");
+        // Delayed delete so files unlocked after this process continues
+        var cmd = "timeout /t 1 /nobreak >nul & rmdir /s /q \"" + dest + "\"";
+        Process.Start(new ProcessStartInfo
+        {
+            FileName = "cmd.exe",
+            Arguments = "/c " + cmd,
+            UseShellExecute = false,
+            CreateNoWindow = true
+        });
+
+        Report(100, "Done.");
+    }
+
+    private static bool IsRegisteredInstall(out string installLocation)
+    {
+        installLocation = "";
+        try
+        {
+            using var key = Registry.CurrentUser.OpenSubKey(UninstallRegKey);
+            var loc = key?.GetValue("InstallLocation") as string;
+            if (!string.IsNullOrWhiteSpace(loc) && Directory.Exists(loc))
+            {
+                installLocation = loc;
+                return true;
+            }
+        }
+        catch { /* ignore */ }
+        return false;
+    }
+
+    private static string ResolveExe(string dest)
+    {
+        var exe = Path.Combine(dest, ExeName);
+        if (File.Exists(exe)) return exe;
+        var legacy = Path.Combine(dest, LegacyExeName);
+        return File.Exists(legacy) ? legacy : exe;
+    }
+
+    private static void WriteUninstaller(string dest, string exe)
+    {
+        var version = Assembly.GetExecutingAssembly().GetName().Version?.ToString(3) ?? "1.3.1";
+        var ps1 = Path.Combine(dest, "Uninstall.ps1");
+        var cmd = Path.Combine(dest, "Uninstall.cmd");
+
+        var script = new StringBuilder();
+        script.AppendLine("$ErrorActionPreference = 'Stop'");
+        script.AppendLine("$InstallDir = Split-Path -Parent $MyInvocation.MyCommand.Path");
+        script.AppendLine("$Product = '" + AppDisplayName.Replace("'", "''") + "'");
+        script.AppendLine("$ExeBase = '" + Path.GetFileNameWithoutExtension(ExeName).Replace("'", "''") + "'");
+        script.AppendLine("$LegacyExeBase = '" + Path.GetFileNameWithoutExtension(LegacyExeName).Replace("'", "''") + "'");
+        script.AppendLine("$DesktopLnk = Join-Path ([Environment]::GetFolderPath('Desktop')) '" + DesktopLnk.Replace("'", "''") + "'");
+        script.AppendLine("$StartMenu = Join-Path ([Environment]::GetFolderPath('StartMenu')) 'Programs\\" + StartMenuFolder.Replace("'", "''") + "'");
+        script.AppendLine("$UninstallKey = 'HKCU:\\" + UninstallRegKey.Replace("'", "''") + "'");
+        script.AppendLine("$AppPaths = 'HKCU:\\" + AppPathsKey.Replace("'", "''") + "'");
+        script.AppendLine(@"
+$r = [System.Windows.Forms.MessageBox]::Show(
+  ""Uninstall $Product from:`n$InstallDir`n`nContinue?"",
+  ""Uninstall $Product"",
+  [System.Windows.Forms.MessageBoxButtons]::YesNo,
+  [System.Windows.Forms.MessageBoxIcon]::Question)
+if ($r -ne [System.Windows.Forms.DialogResult]::Yes) { exit 0 }
+
+Get-Process -Name $ExeBase,$LegacyExeBase -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+Start-Sleep -Milliseconds 400
+
+if (Test-Path -LiteralPath $DesktopLnk) { Remove-Item -LiteralPath $DesktopLnk -Force -ErrorAction SilentlyContinue }
+if (Test-Path -LiteralPath $StartMenu) { Remove-Item -LiteralPath $StartMenu -Recurse -Force -ErrorAction SilentlyContinue }
+if (Test-Path $UninstallKey) { Remove-Item $UninstallKey -Recurse -Force -ErrorAction SilentlyContinue }
+if (Test-Path $AppPaths) { Remove-Item $AppPaths -Recurse -Force -ErrorAction SilentlyContinue }
+
+# Delayed folder delete (this script lives inside the install dir)
+$cmd = 'timeout /t 1 /nobreak >nul & rmdir /s /q ""' + $InstallDir + '""'
+Start-Process -FilePath cmd.exe -ArgumentList '/c', $cmd -WindowStyle Hidden
+[System.Windows.Forms.MessageBox]::Show(""$Product has been uninstalled."", ""Uninstall complete"")
+");
+        // Need WinForms for MessageBox - load assembly
+        var fullPs = @"
+Add-Type -AssemblyName System.Windows.Forms
+" + script;
+        File.WriteAllText(ps1, fullPs, Encoding.UTF8);
+
+        File.WriteAllText(cmd,
+            "@echo off\r\n" +
+            "cd /d \"%~dp0\"\r\n" +
+            "powershell.exe -NoProfile -ExecutionPolicy Bypass -File \"%~dp0Uninstall.ps1\"\r\n",
+            Encoding.ASCII);
+
+        // Also store version note for registry
+        File.WriteAllText(Path.Combine(dest, "version.txt"), version);
+    }
+
+    private static void RegisterUninstall(string dest, string exe)
+    {
+        var version = "1.3.1";
+        var versionFile = Path.Combine(dest, "version.txt");
+        if (File.Exists(versionFile))
+            version = File.ReadAllText(versionFile).Trim();
+
+        var uninstallCmd = Path.Combine(dest, "Uninstall.cmd");
+        using var key = Registry.CurrentUser.CreateSubKey(UninstallRegKey);
+        if (key is null) return;
+        key.SetValue("DisplayName", AppDisplayName);
+        key.SetValue("DisplayVersion", version);
+        key.SetValue("Publisher", "RobbieB1980");
+        key.SetValue("InstallLocation", dest);
+        key.SetValue("DisplayIcon", exe);
+        key.SetValue("UninstallString", "\"" + uninstallCmd + "\"");
+        key.SetValue("QuietUninstallString", "\"" + uninstallCmd + "\"");
+        key.SetValue("NoModify", 1, RegistryValueKind.DWord);
+        key.SetValue("NoRepair", 1, RegistryValueKind.DWord);
+        try
+        {
+            long size = 0;
+            foreach (var f in Directory.EnumerateFiles(dest, "*", SearchOption.AllDirectories))
+                size += new FileInfo(f).Length;
+            key.SetValue("EstimatedSize", (int)Math.Max(1, size / 1024), RegistryValueKind.DWord);
+        }
+        catch { /* optional */ }
+    }
+
+    private static void TryExtractEmbeddedIcon(string destIco)
+    {
+        if (File.Exists(destIco)) return;
+        try
+        {
+            var asm = Assembly.GetExecutingAssembly();
+            // Single-file publish: extract icon from our own EXE
+            using var icon = Icon.ExtractAssociatedIcon(Environment.ProcessPath ?? Application.ExecutablePath);
+            if (icon is null) return;
+            using var fs = File.Create(destIco);
+            icon.Save(fs);
+        }
+        catch { /* optional */ }
     }
 
     private static string? FindPayloadZip()
@@ -247,7 +487,6 @@ public sealed class SetupForm : Form
             if (File.Exists(p)) return p;
         }
 
-        // Embedded resource (self-contained single-file installer)
         var asm = Assembly.GetExecutingAssembly();
         var resourceName = asm.GetManifestResourceNames()
             .FirstOrDefault(n => n.EndsWith("portable-payload.zip", StringComparison.OrdinalIgnoreCase)
@@ -261,7 +500,6 @@ public sealed class SetupForm : Form
             return temp;
         }
 
-        // Dev layout: dist next to repo
         var dev = Path.GetFullPath(Path.Combine(baseDir, "..", "..", "..", "..", "dist", "portable-payload.zip"));
         if (File.Exists(dev)) return dev;
 
@@ -271,8 +509,6 @@ public sealed class SetupForm : Form
     private static void ExtractZip(string zipPath, string dest, Action<double> progress)
     {
         using var zip = ZipFile.OpenRead(zipPath);
-        var entries = zip.Entries.Where(e => !string.IsNullOrEmpty(e.Name) || e.FullName.EndsWith('/') || e.FullName.EndsWith('\\')).ToList();
-        // Prefer extracting contents if zip has a single root folder
         var rootPrefix = DetectSingleRootPrefix(zip.Entries.Select(e => e.FullName));
         var total = Math.Max(1, zip.Entries.Count(e => !string.IsNullOrEmpty(e.Name)));
         var done = 0;
@@ -328,17 +564,20 @@ public sealed class SetupForm : Form
         _status.Text = status;
     }
 
-    private static void CreateShortcut(string lnkPath, string target, string workingDir, string? args = null)
+    private static void CreateShortcut(string lnkPath, string target, string workingDir, string? args = null, string? iconPath = null)
     {
         Directory.CreateDirectory(Path.GetDirectoryName(lnkPath)!);
-        // Use PowerShell to create .lnk without extra COM packages
+        var iconLine = string.IsNullOrEmpty(iconPath)
+            ? ""
+            : $"$s.IconLocation = '{EscapePs(iconPath)},0'";
         var ps = $@"
 $w = New-Object -ComObject WScript.Shell
 $s = $w.CreateShortcut('{EscapePs(lnkPath)}')
 $s.TargetPath = '{EscapePs(target)}'
 $s.WorkingDirectory = '{EscapePs(workingDir)}'
 {(args is null ? "" : $"$s.Arguments = '{EscapePs(args)}'")}
-$s.Description = 'RB All Updater'
+{iconLine}
+$s.Description = '{EscapePs(AppDisplayName)}'
 $s.Save()
 ";
         var psi = new ProcessStartInfo
@@ -350,6 +589,16 @@ $s.Save()
         };
         using var p = Process.Start(psi);
         p?.WaitForExit(15000);
+    }
+
+    private static void TryDelete(string path)
+    {
+        try { if (File.Exists(path)) File.Delete(path); } catch { /* ignore */ }
+    }
+
+    private static void TryDeleteDir(string path)
+    {
+        try { if (Directory.Exists(path)) Directory.Delete(path, recursive: true); } catch { /* ignore */ }
     }
 
     private static string EscapePs(string s) => s.Replace("'", "''");

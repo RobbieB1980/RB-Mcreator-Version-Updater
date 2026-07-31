@@ -77,6 +77,11 @@ start "" "%~dp0RB-All-Updater.exe"
 '@ | Set-Content (Join-Path $PortableRoot 'Start-Updater.bat') -Encoding ASCII
 
 Copy-Item (Join-Path $RepoRoot 'README.md') (Join-Path $PortableRoot 'README.md') -Force
+$ico = Join-Path $RepoRoot 'assets\app.ico'
+if (Test-Path $ico) {
+    Copy-Item $ico (Join-Path $PortableRoot 'app.ico') -Force
+    Write-Host "    app.ico (from assets)"
+}
 
 # LICENSE note
 @'
