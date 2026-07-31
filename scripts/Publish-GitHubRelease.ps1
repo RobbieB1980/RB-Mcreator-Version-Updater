@@ -3,13 +3,13 @@
   Create/update a GitHub Release and upload portable + setup artifacts from dist/.
 
 .EXAMPLE
-  .\scripts\Publish-GitHubRelease.ps1 -Tag v1.3.0
+  .\scripts\Publish-GitHubRelease.ps1 -Tag v1.3.1
 #>
 [CmdletBinding()]
 param(
-    [string]$Tag = 'v1.3.0',
+    [string]$Tag = 'v1.3.1',
     [string]$Repo = 'RobbieB1980/RB-Mcreator-Version-Updater',
-    [string]$Name = 'RB All Updater 1.3.0'
+    [string]$Name = 'RB All Updater 1.3.1'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -66,18 +66,15 @@ Convert **MCreator**, **ModDevGradle**, and **NeoGradle** 26.1.x projects to **M
 | ``RB-All-Updater-Setup.exe`` | Windows installer (self-contained; embeds full portable toolset) |
 | ``RB-All-Updater-Portable.zip`` | No install - extract and run ``Start-Updater.bat`` or the EXE |
 
-### What's new in 1.3.0
+### What's new in 1.3.1
 
-- Rebranded to **RB All Updater** (not only MCreator)
-- Detects project type: MCreator / ModDevGradle / NeoGradle
-- Preserves author ``mod_version``; retargets 26.1 strings to 26.2
-- Prefer MDG ``src/main/templates`` mods.toml (do not overwrite hand ports)
-- Inject NeoForged maven into ``settings.gradle`` when missing
-- Auto-scaffold missing ``assets/*/items/*.json`` client item defs (fixes purple creative icons)
-- Fix bare model parents (``minecraft:item/generated``, ``minecraft:block/cube``, spawn eggs)
-- New Java transform: ``BlockPos.getCenter()`` -> ``Vec3.atCenterOf(...)``
-- Dry-run + compile no longer fail with fake wrapper/missing java warnings
-- GUI layout reworked for DPI (no overlapping labels/buttons)
+- Fix ``mod_license`` / ``processResources`` failure on decompiled projects that already have ``mod_id``
+- Always write ``mod_license``, ``mod_credits``, ``mod_display_url`` for NeoGradle MDK expand
+- Java: ``EntityType.FIELD`` -> ``EntityTypes.FIELD``
+- Java: full ColorCollection grid for Items/Blocks (wool, glazed terracotta, …)
+- Java: ``getMainCamera()`` -> ``mainCamera()``; ``renderBuffers()`` via ``gameRenderer``
+- Warn on residual ``MultiBufferSource`` / ``bufferSource()`` (manual SubmitCustomGeometry port)
+- Tests + CHANGELOG updated
 
 ### Requirements
 
